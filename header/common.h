@@ -1,20 +1,23 @@
 #ifndef COMMON_H
 #define COMMON_H
-#endif
 
+//MMIO base address
 #define MMIO_BASE       0x3F000000
+
+//GPIO registers
 #define GPIO_BASE       (MMIO_BASE + 0x200000)
 #define GPFSEL1        (GPIO_BASE + 0x04)
 #define GPPUD         (GPIO_BASE + 0x94)
 #define GPPUDCLK0     (GPIO_BASE + 0x98)
-#define AUX_BASE       (MMIO_BASE + 0x215000)
-#define AUX_ENABLES    (AUX_BASE + 0x04)
-#define AUX_MU_IO_REG  (AUX_BASE + 0x40)
-#define AUX_MU_IER_REG (AUX_BASE + 0x44)
-#define AUX_MU_LCR_REG (AUX_BASE + 0x4C)
-#define AUX_MU_IIR_REG (AUX_BASE + 0x48)
-#define AUX_MU_MCR_REG (AUX_BASE + 0x50)
-#define AUX_MU_LSR_REG (AUX_BASE + 0x54)
-#define AUX_MU_CNTL_REG (AUX_BASE + 0x60)
-#define AUX_MU_STAT_REG (AUX_BASE + 0x64)
-#define AUX_MU_BAUD_REG (AUX_BASE + 0x68)
+
+static inline void mmio_write(unsigned long reg, unsigned int data) 
+{
+    *(volatile unsigned int *)reg = data;
+}
+
+static inline unsigned int mmio_read(unsigned long reg)
+{
+    return *(volatile unsigned int *)reg;
+}
+
+#endif
