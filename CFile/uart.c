@@ -23,24 +23,26 @@ void uart_init()
     mmio_write(AUX_ENABLES, aux_enables);
 
     //關閉TX/RX(資料接收的設定先關閉，以防變更設定時寫入錯誤資料至mmio)
-    unsigned int now_aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
+    unsigned int aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
     unsigned int aux_mu_cntl_reg_mask = ~(3);
-    now_aux_mu_cntl_reg = (now_aux_mu_cntl_reg & aux_mu_cntl_reg_mask);
-    mmio_write(AUX_MU_CNTL_REG, now_aux_mu_cntl_reg);
+    aux_mu_cntl_reg = (aux_mu_cntl_reg & aux_mu_cntl_reg_mask);
+    mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
 
-    //關閉中斷，避免FIFO是空的，讓CPU不會觸發這裡的INTERRUPT導致陷入無窮迴圈
+    //關閉中斷，避免在動FIFO時CPU觸發這裡的INTERRUPT導致陷入無窮迴圈
     unsigned int aux_mu_ier_reg = mmio_read(AUX_MU_IER_REG);
     unsigned int aux_mu_ier_reg_mask = ~(3);
     aux_mu_ier_reg = aux_mu_ier_reg & aux_mu_ier_reg_mask;
     mmio_write(AUX_MU_IER_REG, aux_mu_ier_reg);
 
-    
+    //控制 Flow Control (流量控制) 的訊號線，使之後mini uart不會玩flow control那套
+    unsigned int aux_mu_mcr_reg_mask = 0;
+    mmio_write(AUX_MU_MCR_REG, aux_mu_mcr_reg_mask);
 
-    //清空FIFO
+    //清空FIFO，這個暫存器讀出來的數值為中斷狀態。但寫進去的數值(只有第1、2bit可寫其他為READ-ONIY或REVERSE BIT)
+    //代表是否清空FIFObit 1 = 1 → 清 RX FIFO，bit 2 = 1 → 清 TX FIFO
     unsigned int aux_mu_iir_reg = mmio_read(AUX_MU_IIR_REG);
-    unsigned int aux_mu_iir_reg_mask = 3 << 1;
-    aux_mu_iir_reg = aux_mu_iir_reg & aux_mu_iir_reg_mask;
-    mmio_write(AUX_MU_IIR_REG, aux_mu_iir_reg);
+    unsigned int aux_mu_iir_reg_mask = 0x06;
+    mmio_write(AUX_MU_IIR_REG, aux_mu_iir_reg_mask);
 
     //決定mini UART資料格式
     unsigned int aux_mu_lcr_reg = mmio_read(AUX_MU_LCR_REG);
@@ -48,5 +50,34 @@ void uart_init()
     aux_mu_lcr_reg = aux_mu_lcr_reg | aux_mu_lcr_reg_mask;
     mmio_write(AUX_MU_LCR_REG, aux_mu_lcr_reg);
 
+    //設定傳送速度
+    unsigned int aux_mu_baud_reg_mask = 270;
+    mmio_write(AUX_MU_BAUD_REG, aux_mu_baud_reg_mask);
 
+    //disable pull-up/down
+    unsigned int gppud = mmio_read(GPPUD);
+    unsigned int gppud_mask = ~(3);
+    gppud = gppud & gppud_mask;
+    mmio_write(GPPUD, gppud);
+
+    //將GPIO 14、15設為GPPUD的設定
+    unsigned int gppudclk0 = mmio_read(GPPUDCLK0);
+    unsigned int gppudclk0_mask = 3 << 14;
+    gppudclk0 = gppudclk0 | gppudclk0_mask;
+    mmio_write(GPPUDCLK0, gppudclk0);
+
+    //將GPFSEL1清零後設為ALT5(GPIO14、GPIO15使用MINI UART)
+    unsigned int gpfsel1= mmio_read(GPFSEL1);
+    unsigned int gpfsel1_mask = ~(63 << 12);
+    gpfsel1 = gpfsel1 & gpfsel1_mask;
+    mmio_write(GPFSEL1, gpfsel1);
+    gpfsel1_mask = 18 << 12;
+    gpfsel1 = gpfsel1 | gpfsel1_mask;
+    mmio_write(GPFSEL1, gpfsel1);
+
+    //開啟TX/RX
+    aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
+    aux_mu_cntl_reg_mask = (3);
+    aux_mu_cntl_reg = (aux_mu_cntl_reg | aux_mu_cntl_reg_mask);
+    mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
 }
