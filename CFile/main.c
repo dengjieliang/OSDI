@@ -1,4 +1,4 @@
-#include "haeder/uart.h"
+#include "../header/uart.h"
 
 int kernel_main(void)
 {
