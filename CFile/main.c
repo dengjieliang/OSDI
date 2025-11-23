@@ -1,6 +1,6 @@
-int g_test;
+#include "haeder/uart.h"
 
 int kernel_main(void)
 {
-    return 0;
+    uart_init();
 }
