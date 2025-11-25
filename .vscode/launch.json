@@ -2,26 +2,42 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "(gdb) Attach to QEMU aarch64",
+      "name": "(gdb) Attach to QEMU",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/kernel8.elf",
       "cwd": "${workspaceFolder}",
       "MIMode": "gdb",
       "miDebuggerPath": "/usr/bin/gdb-multiarch",
-      "miDebuggerServerAddress": "localhost:1234",
+      "miDebuggerServerAddress": "127.0.0.1:1234",
       "externalConsole": false,
       "stopAtEntry": false,
       "setupCommands": [
-        { "text": "-enable-pretty-printing" }
+        {
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
       ],
-
-      // 選一種：
-      // 1. 懶得管就刪掉這行，F5 不會自動 build
-      // "preLaunchTask": "build (make)"
-
-      // 2. 如果想要 F5 順便檢查有沒有重新 make，就留 "build (make)"，不要改成 qemu-gdb
-      "preLaunchTask": "build (make)"
+      "preLaunchTask": "Build Kernel"
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": [],
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "cwd": "/home/marginal/osdi-wsl-starter/osdi-lab0/CFile",
+      "program": "/home/marginal/osdi-wsl-starter/osdi-lab0/CFile/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
     }
   ]
 }

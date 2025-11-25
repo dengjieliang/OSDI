@@ -24,6 +24,8 @@
 //代表是否清空FIFObit 1 = 1 → 清 RX FIFO，bit 2 = 1 → 清 TX FIFO
 #define AUX_CLEAR_TX_RX_FIFO 0x06
 #define AUX_TX_FIFO_EMPTY (1 << 5) // 或 0x20，表示 TX FIFO 為空，可以寫入資料
+#define AUX_RX_FIFO_EMPTY 0X01 // 表示 RX FIFO 為空，沒有資料可讀
+#define AUX_CHAR_MASK 0xFF // 只取資料的低 8 bits讀取為CHAR傳回給CPU
 #define AUX_MINI_UART_DATA_TYPE 3 // 8-bit data
 #define AUX_BAUD_RATE_115200 270 // 設定傳送速度為 115200 baud rate
 
@@ -111,6 +113,31 @@ void uart_send(char c)
     }
     //寫入資料
     mmio_write(AUX_MU_IO_REG, c);
+}
+
+char uart_recv()
+{
+    while ((mmio_read(AUX_MU_LSR_REG) & AUX_RX_FIFO_EMPTY) == 0)
+    {
+        asm volatile("nop");
+    }
+
+    //讀取字元資料只取低 8 bits
+    return (char)(mmio_read(AUX_MU_IO_REG) & AUX_CHAR_MASK);
+}
+
+void uart_puts(const char *s)
+{
+    while (*s != '\0')
+    {
+        //換行字元前先加上回車字元
+        if (*s == '\n')
+        {
+            uart_send('\r');
+        }
+
+        uart_send(*s++);
+    }
 }
 
 void delay_cycles(unsigned int time)

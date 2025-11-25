@@ -5,6 +5,17 @@
     .type clear_bss, %function  /* 定義 clear_bss 為function */
     .extern kernel_main        /* 宣告 kernel_main 函式為外部函式 */
 
+    .globl _start
+    
+_start:
+    ldr x3, = _stack_top  /*將堆疊頂部地址載入 x3*/
+    mov sp, x3           /*設定堆疊指標 (sp) 為堆疊頂部*/
+    ldr x0, = __bss_start /*將bss起始地址載入 x0*/
+    ldr x1, = __bss_end  /*將bss結尾地址載入 x1*/
+    bl clear_bss         /*呼叫bss清零函式，使用bl的話，參數必須根據x0、x1、x2...順序擺放*/
+    bl kernel_main      /* 呼叫 kernel_main 函式 */
+    b idle_loop       /* 呼叫 idle_loop 以避免返回 */
+
 clear_bss:
     /* 參數：x0 = start, x1 = end */
     
@@ -23,17 +34,6 @@ _bss_clear_done:
     ret                        /* 從函式返回 */
     
     .size clear_bss, . - clear_bss
-
-    .globl _start
-    
-_start:
-    ldr x3, = _stack_top  /*將堆疊頂部地址載入 x3*/
-    mov sp, x3           /*設定堆疊指標 (sp) 為堆疊頂部*/
-    ldr x0, = __bss_start /*將bss起始地址載入 x0*/
-    ldr x1, = __bss_end  /*將bss結尾地址載入 x1*/
-    bl clear_bss         /*呼叫bss清零函式，使用bl的話，參數必須根據x0、x1、x2...順序擺放*/
-    bl kernel_main      /* 呼叫 kernel_main 函式 */
-    b idle_loop       /* 呼叫 idle_loop 以避免返回 */
 
 idle_loop:
     wfe
