@@ -11,14 +11,14 @@
       "miDebuggerPath": "/usr/bin/gdb-multiarch",
       "miDebuggerServerAddress": "127.0.0.1:1234",
       "externalConsole": false,
-      "stopAtEntry": false,
+      "stopAtEntry": true,
       "setupCommands": [
         {
           "text": "-enable-pretty-printing",
           "ignoreFailures": true
         }
       ],
-      "preLaunchTask": "Build Kernel"
+      "preLaunchTask": "Start QEMU (Background)"
     },
     {
       "name": "C/C++ Runner: Debug Session",

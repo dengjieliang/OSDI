@@ -4,10 +4,15 @@
 
 typedef void(*CommandFunc)(void);
 
-struct Command
+typedef struct Command
 {
-    char *name;
-    ConnandFunc func;
-}
+    const char *name;
+    CommandFunc func;
+}Command_t;
+
+void execute_command(const char *cmd_name);
+
+void cmd_hello(void);
+void cmd_help(void);
 
 #endif

@@ -18,6 +18,29 @@
             "command": "make",
             "args": ["clean"],
             "problemMatcher": []
+        },
+        {
+            "label": "Start QEMU (Background)",
+            "type": "shell",
+            "command": "make",
+            "args": ["qemu-gdb"],
+            "isBackground": true,
+            "dependsOn": "Build Kernel", // 按 F5 時會先強制編譯
+            "problemMatcher": {
+                "pattern": [
+                    {
+                        "regexp": ".",
+                        "file": 1,
+                        "location": 2,
+                        "message": 3
+                    }
+                ],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*qemu-system-aarch64", // 偵測到這行指令開始
+                    "endsPattern": "^.*$"  // 只要有輸出就視為已啟動
+                }
+            }
         }
     ]
 }
