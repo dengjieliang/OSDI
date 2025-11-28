@@ -5,6 +5,5 @@ void kernel_main(void)
 {
     uart_init();
 
-    cmd_hello();
-    cmd_help();
+    shell_main();
 }

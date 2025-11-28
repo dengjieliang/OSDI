@@ -10,9 +10,10 @@ typedef struct Command
     CommandFunc func;
 }Command_t;
 
+void shell_main();
 void execute_command(const char *cmd_name);
-
-void cmd_hello(void);
-void cmd_help(void);
+const char* shell_input_line();
+static void cmd_hello(void);
+static void cmd_help(void);
 
 #endif

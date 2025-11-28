@@ -1,0 +1,95 @@
+[
+ {
+  "directory": "/home/marginal/osdi-wsl-starter/osdi-lab0",
+  "arguments": [
+   "aarch64-linux-gnu-gcc",
+   "-Wall",
+   "-O2",
+   "-ffreestanding",
+   "-nostdlib",
+   "-nostartfiles",
+   "-g",
+   "-c",
+   "Assembly/boot.S",
+   "-o",
+   "build/boot.o"
+  ],
+  "file": "Assembly/boot.S"
+ },
+ {
+  "directory": "/home/marginal/osdi-wsl-starter/osdi-lab0",
+  "arguments": [
+   "aarch64-linux-gnu-gcc",
+   "-Wall",
+   "-O2",
+   "-ffreestanding",
+   "-nostdlib",
+   "-nostartfiles",
+   "-g",
+   "-mgeneral-regs-only",
+   "-Iheader",
+   "-c",
+   "CFile/main.c",
+   "-o",
+   "build/main.o"
+  ],
+  "file": "CFile/main.c"
+ },
+ {
+  "directory": "/home/marginal/osdi-wsl-starter/osdi-lab0",
+  "arguments": [
+   "aarch64-linux-gnu-gcc",
+   "-Wall",
+   "-O2",
+   "-ffreestanding",
+   "-nostdlib",
+   "-nostartfiles",
+   "-g",
+   "-mgeneral-regs-only",
+   "-Iheader",
+   "-c",
+   "CFile/shell.c",
+   "-o",
+   "build/shell.o"
+  ],
+  "file": "CFile/shell.c"
+ },
+ {
+  "directory": "/home/marginal/osdi-wsl-starter/osdi-lab0",
+  "arguments": [
+   "aarch64-linux-gnu-gcc",
+   "-Wall",
+   "-O2",
+   "-ffreestanding",
+   "-nostdlib",
+   "-nostartfiles",
+   "-g",
+   "-mgeneral-regs-only",
+   "-Iheader",
+   "-c",
+   "CFile/string.c",
+   "-o",
+   "build/string.o"
+  ],
+  "file": "CFile/string.c"
+ },
+ {
+  "directory": "/home/marginal/osdi-wsl-starter/osdi-lab0",
+  "arguments": [
+   "aarch64-linux-gnu-gcc",
+   "-Wall",
+   "-O2",
+   "-ffreestanding",
+   "-nostdlib",
+   "-nostartfiles",
+   "-g",
+   "-mgeneral-regs-only",
+   "-Iheader",
+   "-c",
+   "CFile/uart.c",
+   "-o",
+   "build/uart.o"
+  ],
+  "file": "CFile/uart.c"
+ }
+]
