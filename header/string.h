@@ -1,5 +1,3 @@
-#include "../header/common.h"
-
 #ifndef STRING_H
 #define STRING_H
 

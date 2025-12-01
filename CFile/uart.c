@@ -115,6 +115,27 @@ void uart_send(char c)
     mmio_write(AUX_MU_IO_REG, c);
 }
 
+void uart_send_hex(unsigned int number)
+{
+    unsigned int digit_number = 0;
+    unsigned int tmp = number;
+    char number_char[100];
+
+    while (tmp != 0)
+    {
+        number_char[digit_number] = (tmp % 10) + '/0';
+        tmp /= 10;
+        digit_number += 1;
+    }
+
+    for (int i = digit_number; digit_number >= 0; digit_number -= 1)
+    {
+        uart_send(number_char[i]);
+    }
+
+    uart_send('\n');
+}
+
 char uart_recv()
 {
     while ((mmio_read(AUX_MU_LSR_REG) & AUX_RX_FIFO_EMPTY) == 0)
