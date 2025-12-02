@@ -14,8 +14,12 @@
 #define MBOX_STATUS (MBOX_BASE + 0X18)
 #define MBOX_CONFIG (MBOX_BASE + 0X1C)
 #define MBOX_WRITE (MBOX_BASE + 0X20)
+#define MBOX_CH_PROP (8)
 
-void mailbox_call();
+void mailbox_call(unsigned int channel);
+void prepare_board_revision_request();
+unsigned int mailbox_get_status();
+unsigned int mailbox_get_board_revision();
 
 #endif
 

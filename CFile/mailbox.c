@@ -17,17 +17,12 @@
 
 unsigned int mailbox_buffer[7] __attribute__((aligned(16)));
 
-static void Write_Mailbox_Buffer_Data();
-
-void mailbox_call()
+void mailbox_call(unsigned int channel)
 {
     while((mmio_read(MBOX_STATUS) & MBOX_CAN_WRITE) != 0)
     {
         asm volatile("nop");
     }
-
-    //寫入資料到MailBox Buffer
-    Write_Mailbox_Buffer_Data();
 
     //轉換資料記憶體位置變成unsigned int，用mmio
     unsigned int buffer_address = (unsigned int)((unsigned long)mailbox_buffer);
@@ -36,23 +31,21 @@ void mailbox_call()
 
     while (1)
     {
-        if ((mmio_read(MBOX_STATUS) & MBOX_CAN_READ) == 0)
+        while ((mmio_read(MBOX_STATUS) & MBOX_CAN_READ) != 0)
         {
-            unsigned int Mbox_Channel = mmio_read(MBOX_READ);
-            if ((Mbox_Channel & 0xF) == 0x8)
-            {
-                break;
-            }
+            asm volatile("nop");
         }
-    }
 
-    if (mailbox_buffer[1] == 0x80000000)
-    {
-        uart_puts("Request Success");
+        unsigned int Mbox_Channel = mmio_read(MBOX_READ);
+
+        if ((Mbox_Channel & 0xF) == 0x8)
+        {
+            break;
+        }
     }
 }
 
-static void Write_Mailbox_Buffer_Data()
+void prepare_board_revision_request()
 {
     mailbox_buffer[BUFFER_SIZE] = MAILBOX_BUFFER_SIZE * sizeof(unsigned int);
     mailbox_buffer[REQUEST_AND_RESPONSE] = 0;
@@ -61,6 +54,18 @@ static void Write_Mailbox_Buffer_Data()
     mailbox_buffer[VALUE_LENGTH] = 0;
     mailbox_buffer[VALUE_BUFFER] = 0;
     mailbox_buffer[END_TAG] = 0;
+}
+
+// 取得請求狀態碼 (通常在 index 1)
+unsigned int mailbox_get_status() 
+{
+    return mailbox_buffer[REQUEST_AND_RESPONSE];
+}
+
+// 取得 Board Revision 的值 (根據您的定義，在 index 5)
+unsigned int mailbox_get_board_revision() 
+{
+    return mailbox_buffer[VALUE_BUFFER];
 }
 
 
