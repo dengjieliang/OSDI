@@ -2,11 +2,17 @@
 #include "../header/uart.h"
 #include "../header/shell.h"
 #include "../header/string.h"
+#include "../header/mailbox.h"
+
+static void cmd_hello(void);
+static void cmd_help(void);
+static void cmd_board_info(void);
 
 static const Command_t commands[] = 
 {
     {"hello", cmd_hello},
     {"help", cmd_help},
+    {"board info", cmd_board_info},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -94,6 +100,30 @@ static void cmd_help(void)
         uart_puts(" - ");
         uart_puts(commands[i].name);
         uart_puts("\n");
+    }
+}
+
+static void cmd_board_info()
+{
+    //寫入資料到MailBox Buffer
+    prepare_board_revision_request();
+
+    //呼叫mailbox_call確認GPU
+    mailbox_call(MBOX_CH_PROP);
+
+    if (get_board_status() == 0x80000000)
+    {
+        uart_puts("Board Revision: ");
+        uart_send_hex(get_board_revision());
+    }
+
+    prepare_memory_request();
+    mailbox_call(MBOX_CH_PROP);
+
+    if (get_memory_status() == 0x80000000)
+    {
+        uart_puts("Memory Size is: ");
+        uart_send_hex(get_memory_size());
     }
 }
 

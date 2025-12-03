@@ -17,9 +17,16 @@
 #define MBOX_CH_PROP (8)
 
 void mailbox_call(unsigned int channel);
+
+//獲取板子資訊相關
 void prepare_board_revision_request();
-unsigned int mailbox_get_status();
-unsigned int mailbox_get_board_revision();
+unsigned int get_board_status();
+unsigned int get_board_revision();
+
+//獲取memory相關
+void prepare_memory_request();
+unsigned int get_memory_status();
+unsigned int get_memory_size();
 
 #endif
 

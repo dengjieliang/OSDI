@@ -13,7 +13,5 @@ typedef struct Command
 void shell_main();
 void execute_command(const char *cmd_name);
 const char* shell_input_line();
-static void cmd_hello(void);
-static void cmd_help(void);
 
 #endif
