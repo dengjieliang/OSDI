@@ -3,21 +3,30 @@
 #include "../header/shell.h"
 #include "../header/string.h"
 #include "../header/mailbox.h"
+#include "../header/power_manager.h"
+
+static bool reboot_lock = false;
 
 static void cmd_hello(void);
 static void cmd_help(void);
 static void cmd_board_info(void);
+static void cmd_reboot(void);
+static void cmd_cancel_reboot(void);
 
 static const Command_t commands[] = 
 {
-    {"hello", cmd_hello},
-    {"help", cmd_help},
-    {"board info", cmd_board_info},
+    {"Hello", "Print Hello World", cmd_hello},
+    {"Help", "Show All Command", cmd_help},
+    {"Board Info", "Show Board Info", cmd_board_info},
+    {"Reboot", "Reboot Computer", cmd_reboot},
+    {"Cancel Reboot", "Cancel Reboot Computer", cmd_cancel_reboot},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
 void shell_main()
 {
+    uart_puts("\n\n=== RPi3 OS Booting... ===\n"); //顯示已開機
+
     while (1)
     {
         const char* input_buffer = shell_input_line();
@@ -70,6 +79,12 @@ void execute_command(const char *cmd_name)
 {
     for (int i = 0; commands[i].name != NULL; i++)
     {
+        if (reboot_lock && strcmp("Cancel Reboot", cmd_name) != 0)
+        {
+            uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
+            return;
+        }
+
         if (strcmp(commands[i].name, cmd_name) == 0)
         {
             commands[i].func();
@@ -99,12 +114,15 @@ static void cmd_help(void)
     {
         uart_puts(" - ");
         uart_puts(commands[i].name);
+        uart_puts("：");
+        uart_puts(commands[i].description);
         uart_puts("\n");
     }
 }
 
 static void cmd_board_info()
 {
+
     //寫入資料到MailBox Buffer
     prepare_board_revision_request();
 
@@ -125,5 +143,20 @@ static void cmd_board_info()
         uart_puts("Memory Size is: ");
         uart_send_hex(get_memory_size());
     }
+}
+
+static void cmd_reboot()
+{
+    // --- 新增這行 ---
+    uart_puts("Rebooting in T-minus 2 seconds...\n"); //reboot前跳提示
+    // ----------------
+    reset(150000);
+    reboot_lock = true;
+}
+
+static void cmd_cancel_reboot()
+{
+    cancel_reset();
+    reboot_lock = false;
 }
 

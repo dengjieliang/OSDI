@@ -7,6 +7,7 @@ typedef void(*CommandFunc)(void);
 typedef struct Command
 {
     const char *name;
+    const char *description;
     CommandFunc func;
 }Command_t;
 
