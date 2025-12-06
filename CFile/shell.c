@@ -4,12 +4,14 @@
 #include "../header/string.h"
 #include "../header/mailbox.h"
 #include "../header/power_manager.h"
+#include "../header/time.h"
 
 static bool reboot_lock = false;
 
 static void cmd_hello(void);
 static void cmd_help(void);
 static void cmd_board_info(void);
+static void cmd_get_timer(void);
 static void cmd_reboot(void);
 static void cmd_cancel_reboot(void);
 
@@ -18,6 +20,7 @@ static const Command_t commands[] =
     {"Hello", "Print Hello World", cmd_hello},
     {"Help", "Show All Command", cmd_help},
     {"Board Info", "Show Board Info", cmd_board_info},
+    {"Get Timer", "Show Now Timer", cmd_get_timer},
     {"Reboot", "Reboot Computer", cmd_reboot},
     {"Cancel Reboot", "Cancel Reboot Computer", cmd_cancel_reboot},
     {NULL, NULL} // Sentinel to mark the end of the array
@@ -40,8 +43,13 @@ const char* shell_input_line()
     static char input_buffer[128];
 
     int buffer_index = 0;
-
+    
+    uart_puts("[");
+    get_timetick();
+    uart_puts("]");
+    uart_puts("：");
     uart_puts("shell$ ");
+    
 
     while (true)
     {
@@ -143,6 +151,12 @@ static void cmd_board_info()
         uart_puts("Memory Size is: ");
         uart_send_hex(get_memory_size());
     }
+}
+
+static void cmd_get_timer()
+{
+    get_timetick();
+    uart_puts("\n");
 }
 
 static void cmd_reboot()

@@ -115,6 +115,54 @@ void uart_send(char c)
     mmio_write(AUX_MU_IO_REG, c);
 }
 
+void uart_send_integer(int number)
+{
+    if (number == 0)
+    {
+        uart_send('0');
+        return;
+    }
+
+    char buffer[100];
+    unsigned int digit_size = 0;
+
+    while(number > 0)
+    {
+        buffer[digit_size] = (number % 10) + '0';
+        number /= 10;
+        digit_size += 1;
+    }
+
+    for (int i = digit_size - 1; i >= 0; i--)
+    {
+        uart_send(buffer[i]);
+    }
+}
+
+void uart_send_decimal_part(int number, unsigned int digit_size)
+{
+    char buffer[100];
+    unsigned int has_number_size = 0;
+
+    while(number > 0)
+    {
+        buffer[has_number_size] = (number % 10) + '0';
+        number /= 10;
+        has_number_size += 1;
+    }
+
+    while (has_number_size < digit_size)
+    {
+        buffer[has_number_size] = '0';
+        has_number_size += 1;
+    }
+
+    for (int i = has_number_size - 1; i >= 0; i--)
+    {
+        uart_send(buffer[i]);
+    }
+}
+
 void uart_send_hex(unsigned int number)
 {
     for (int hex_section = 28; hex_section >= 0; hex_section -= 4)

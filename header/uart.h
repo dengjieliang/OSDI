@@ -8,6 +8,8 @@ void uart_init();
 void uart_send(char c);
 char uart_recv();
 void uart_puts(const char *s);
+void uart_send_integer(int number);
+void uart_send_decimal_part(int number, unsigned int digit);
 void uart_send_hex(unsigned int number);
 void delay_cycles(unsigned int time);
 
