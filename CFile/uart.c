@@ -187,6 +187,19 @@ void uart_send_hex(unsigned int number)
     uart_puts("\n");
 }
 
+unsigned int uart_recv_uint()
+{
+    unsigned int size = 0;
+
+    for (int i = 3; i >= 0; i--)
+    {
+        char tmp = uart_recv();
+        size |= (tmp << i * sizeof(char));
+    }
+
+    return size;
+}
+
 char uart_recv()
 {
     while ((mmio_read(AUX_MU_LSR_REG) & AUX_RX_FIFO_EMPTY) == 0)
