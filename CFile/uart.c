@@ -191,10 +191,11 @@ unsigned int uart_recv_uint()
 {
     unsigned int size = 0;
 
-    for (int i = 3; i >= 0; i--)
+    //因為python是Little Endian
+    for (int i = 0; i < 4; i++)
     {
         char tmp = uart_recv();
-        size |= (tmp << i * sizeof(char));
+        size |= (((unsigned char)tmp) << i * 8);
     }
 
     return size;

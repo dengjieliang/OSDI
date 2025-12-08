@@ -76,7 +76,8 @@ clean:
 
 # ==== 用 qemu 測試 (直接跑，不暫停) ====
 # 加上 -serial null -serial stdio 來監聽 Mini UART
-QEMU_OPTS := -machine raspi3b -kernel $(IMG) -display none -serial null -serial stdio
+# 2025/12/08 建立虛擬 PTY，讓 Python 可以連進來
+QEMU_OPTS := -machine raspi3b -kernel $(IMG) -display none -serial tcp:127.0.0.1:8888,server,nowait
 
 .PHONY: qemu
 qemu: $(IMG)
