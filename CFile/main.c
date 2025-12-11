@@ -8,6 +8,8 @@ void kernel_main(void)
     //將GPIO接到 mini uart
     uart_init();
 
+    uart_puts("\r\nOSDI: Ready\r\n");
+
     unsigned int size = uart_recv_uint();
     uart_send_hex(size);
 
