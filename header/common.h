@@ -24,6 +24,8 @@
 
 #endif
 
+#define KERNEL_LOAD_ADDRESS 0x80000
+
 //MMIO base address
 #define MMIO_BASE       0x3F000000
 
