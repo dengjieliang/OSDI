@@ -28,16 +28,17 @@ relocate_kernel:
     /*=代表讀此位置而不是此位置的數值 */
     ldr x1, =_start 
     cmp x0, x1
-    bep _done
+    beq _done
 
-    ldr x2, =_stack_top
+    ldr x2, =__bss_end
     sub x2, x2, x1
 
 _relocate_loop:
     cbz x2, _relocate_loop_done
     ldr x3, [x0], #8 
     str x3, [x1], #8
-    sub x2, x2, #8 //x2減8, 並且
+    sub x2, x2, #8 //x2減8
+    b _relocate_loop
 
 _relocate_loop_done:
     ldr x1, =_start

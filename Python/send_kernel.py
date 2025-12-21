@@ -38,3 +38,19 @@ file_size = os.stat('build/kernel8.img').st_size
 header = struct.pack('<I', file_size)
 ser.write(header)
 print(ser.readline().decode())
+
+# [新增] 打開 kernel8.img 並傳送內容
+with open('build/kernel8.img', 'rb') as f:
+    print("Sending kernel image...")
+    ser.write(f.read())  # 這行才是真正把 Kernel 送過去！
+    print("Kernel image sent successfully.")
+
+# [選用] 繼續讀取 Bootloader 傳回來的 "Jump" 訊息，確認有跳轉
+while True:
+    try:
+        line = ser.readline().decode('utf-8', errors='ignore')
+        if line:
+            print(f"[Device]: {line.strip()}")
+    except:
+        print(except)
+        break

@@ -4,8 +4,6 @@ CROSS_COMPILE ?= aarch64-linux-gnu-
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
-
-# 定義 QEMU 指令
 QEMU    := qemu-system-aarch64
 
 # ==== 路徑 ====
@@ -13,81 +11,107 @@ INC_DIR   := header
 BUILD_DIR := build
 
 # ==== 編譯選項 ====
-# [修正 1] 強制關閉最佳化 (-O0)，避免 Driver 讀取迴圈被優化掉
 CFLAGS  := -Wall -O0 -ffreestanding -nostdlib -nostartfiles -g -mgeneral-regs-only -I$(INC_DIR)
-# [修正 2] 組合語言也同步改成 -O0，方便 GDB 除錯
 ASFLAGS := -Wall -O0 -ffreestanding -nostdlib -nostartfiles -g
 
-# ==== 找出所有 .c / .S / .s ====
-C_SRCS := $(wildcard CFile/*.c)
-S_SRCS := $(wildcard Assembly/*.S)
-s_SRCS := $(wildcard Assembly/*.s)
+# ==========================================
+# 1. 定義主要檔案 (關鍵修正)
+# ==========================================
+# 修正：根據你的編譯 Log，你的檔案叫 bootloader_main.c
+C_BOOT_SRC   := CFile/bootloader_main.c
+C_KERNEL_SRC := CFile/kernel_main.c
 
-# ==== Object 檔建立 ====
-# 1. 先把 boot.o 放進來 (Entry Point)
-OBJS := $(BUILD_DIR)/boot.o
+# 2. 找出所有原始碼
+C_ALL := $(wildcard CFile/*.c)
+S_ALL := $(wildcard Assembly/*.S)
+s_ALL := $(wildcard Assembly/*.s)
 
-# 2. 再加入所有的 C 檔案
-OBJS += $(patsubst CFile/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
+# 3. 分離 "共用檔"
+# 技巧：直接把上面定義的 main 檔案過濾掉，剩下的就是 uart.c, utils.c 等
+C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC), $(C_ALL))
 
-# 3. 最後加入剩下的 .S 檔案 (排除 boot.S)
-S_REST := $(filter-out Assembly/boot.S, $(S_SRCS))
-OBJS += $(patsubst Assembly/%.S,$(BUILD_DIR)/%.o,$(S_REST))
+# ==========================================
+# 4. 定義 Object 檔案 (.o)
+# ==========================================
+# 轉換共用 C 檔 -> .o
+OBJ_COMMON_C := $(patsubst CFile/%.c, $(BUILD_DIR)/%.o, $(C_COMMON))
 
-# 4. 加入小寫 .s 檔案
-OBJS += $(patsubst Assembly/%.s,$(BUILD_DIR)/%.o,$(s_SRCS))
+# 轉換 Assembly 檔 (排除 boot.S，因為它要放第一個) -> .o
+OBJ_ASM := $(patsubst Assembly/%.S, $(BUILD_DIR)/%.o, $(filter-out Assembly/boot.S, $(S_ALL))) \
+           $(patsubst Assembly/%.s, $(BUILD_DIR)/%.o, $(s_ALL))
 
-ELF := $(BUILD_DIR)/kernel8.elf
-IMG := $(BUILD_DIR)/kernel8.img
+# 組合共用 Object 清單
+OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM)
 
-# ==== default target ====
-.PHONY: all
-all: $(IMG)
+# 設定 Entry Point Object (boot.o 必須在最前面)
+BOOT_START_OBJ := $(BUILD_DIR)/boot.o
 
-# 確保 build/ 目錄存在
+# ==== 定義最終兩組 Object 清單 (關鍵修正) ====
+# Bootloader = boot.o + 共用.o + bootloader_main.o
+OBJS_FOR_BOOTLOADER := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/bootloader_main.o
+
+# Kernel = boot.o + 共用.o + kernel_main.o
+OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/kernel_main.o
+
+# ==========================================
+# 5. 定義輸出檔名
+# ==========================================
+IMG_BOOT   := $(BUILD_DIR)/bootloader.img
+ELF_BOOT   := $(BUILD_DIR)/bootloader.elf
+
+IMG_KERNEL := $(BUILD_DIR)/kernel8.img
+ELF_KERNEL := $(BUILD_DIR)/kernel8.elf
+
+.PHONY: all clean qemu qemu-gdb
+
+# make all 會同時產生兩個 img
+all: $(IMG_BOOT) $(IMG_KERNEL)
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# ==== 產生 binary image ====
-$(IMG): $(ELF)
+# ==========================================
+# 6. 建置規則
+# ==========================================
+
+# ---- Bootloader (搬運工) ----
+$(IMG_BOOT): $(ELF_BOOT)
 	$(OBJCOPY) -O binary $< $@
 
-# ==== 連結 ====
-$(ELF): $(OBJS) linker.ld | $(BUILD_DIR)
-	$(LD) -T linker.ld -o $@ $(OBJS)
+$(ELF_BOOT): $(OBJS_FOR_BOOTLOADER) linker_boot.ld | $(BUILD_DIR)
+	$(LD) -T linker_boot.ld -o $@ $(OBJS_FOR_BOOTLOADER)
 
-# ==== 編譯 C 檔 ====
+# ---- Kernel (Payload) ----
+$(IMG_KERNEL): $(ELF_KERNEL)
+	$(OBJCOPY) -O binary $< $@
+
+$(ELF_KERNEL): $(OBJS_FOR_KERNEL) linker_kernel.ld | $(BUILD_DIR)
+	$(LD) -T linker_kernel.ld -o $@ $(OBJS_FOR_KERNEL)
+
+# ---- 編譯 C 與 Assembly ----
 $(BUILD_DIR)/%.o: CFile/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# ==== 編譯組合語言 ====
 $(BUILD_DIR)/%.o: Assembly/%.S | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: Assembly/%.s | $(BUILD_DIR)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
-# ==== clean ====
-.PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
 
-# ==== QEMU 參數設定 (Python 傳檔用) ====
-# [修正 3] 關鍵修正！
-# 第一個 -serial null 是給 UART0 (我們沒用)
-# 第二個 -serial tcp... 是給 UART1 (Mini UART，我們在用的)
-# 使用 server (blocking) 讓 QEMU 暫停等待 Python 連線
-QEMU_OPTS := -machine raspi3b -kernel $(IMG) -display none -serial null -serial tcp:127.0.0.1:8888,server
+# ==========================================
+# 7. QEMU 執行設定
+# ==========================================
 
-.PHONY: qemu
-qemu: $(IMG)
+# 讓 QEMU 載入 bootloader.img
+QEMU_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -display none -serial null -serial tcp:127.0.0.1:8888,server
+
+qemu: $(IMG_BOOT) $(IMG_KERNEL)
 	$(QEMU) $(QEMU_OPTS)
 
-# ==== GDB 用的 QEMU (除錯用) ====
-# [修正 4] 同步修正 UART Mapping
-# 這裡使用 nowait，避免如果你只開 GDB 沒開 Python 時 QEMU 卡在啟動階段
-QEMU_GDB_OPTS := -machine raspi3b -kernel $(IMG) -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
+QEMU_GDB_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
 
-.PHONY: qemu-gdb
-qemu-gdb: $(IMG)
+qemu-gdb: $(IMG_BOOT) $(IMG_KERNEL)
 	$(QEMU) $(QEMU_GDB_OPTS)

@@ -22,10 +22,11 @@
         {
             "label": "Start QEMU (Background)",
             "type": "shell",
-            "command": "make",
-            "args": ["qemu-gdb"],
+            // [關鍵修正]：啟動前先強制殺掉舊的 QEMU
+            // "|| true" 的意思是：就算沒找到 QEMU 可以殺 (第一字執行時)，也不要報錯，繼續往下執行
+            "command": "pkill -9 qemu-system-aarch64 || true && make qemu-gdb",
             "isBackground": true,
-            "dependsOn": "Build Kernel", // 按 F5 時會先強制編譯
+            "dependsOn": "Build Kernel",
             "problemMatcher": {
                 "pattern": [
                     {
@@ -37,8 +38,8 @@
                 ],
                 "background": {
                     "activeOnStart": true,
-                    "beginsPattern": "^.*qemu-system-aarch64", // 偵測到這行指令開始
-                    "endsPattern": "^.*$"  // 只要有輸出就視為已啟動
+                    "beginsPattern": "^.*qemu-system-aarch64", 
+                    "endsPattern": "^.*$" 
                 }
             }
         }
