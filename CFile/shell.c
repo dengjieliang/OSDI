@@ -47,7 +47,7 @@ const char* shell_input_line()
     uart_puts("[");
     get_timetick();
     uart_puts("]");
-    uart_puts("：");
+    uart_puts(":");
     uart_puts("shell$ ");
     
 
@@ -122,7 +122,7 @@ static void cmd_help(void)
     {
         uart_puts(" - ");
         uart_puts(commands[i].name);
-        uart_puts("：");
+        uart_puts(":");
         uart_puts(commands[i].description);
         uart_puts("\n");
     }
