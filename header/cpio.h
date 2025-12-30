@@ -3,7 +3,9 @@
 
 #include "../header/common.h"
 
+#define FILE_HEADER 0x8000000
+
 /* 宣告解析函式 */
-bool cpio_parse_newc_header(void *archive_addr);
+bool cpio_get_header_name(void *file_header);
 
 #endif

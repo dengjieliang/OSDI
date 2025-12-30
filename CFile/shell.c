@@ -5,6 +5,7 @@
 #include "../header/mailbox.h"
 #include "../header/power_manager.h"
 #include "../header/time.h"
+#include "../header/cpio.h"
 
 static bool reboot_lock = false;
 
@@ -14,6 +15,7 @@ static void cmd_board_info(void);
 static void cmd_get_timer(void);
 static void cmd_reboot(void);
 static void cmd_cancel_reboot(void);
+static void cmd_get_file_header(void);
 
 static const Command_t commands[] = 
 {
@@ -23,6 +25,7 @@ static const Command_t commands[] =
     {"Get Timer", "Show Now Timer", cmd_get_timer},
     {"Reboot", "Reboot Computer", cmd_reboot},
     {"Cancel Reboot", "Cancel Reboot Computer", cmd_cancel_reboot},
+    {"ls", "Get All File Header", cmd_get_file_header},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -172,5 +175,11 @@ static void cmd_cancel_reboot()
 {
     cancel_reset();
     reboot_lock = false;
+}
+
+static void cmd_get_file_header(void)
+{
+    void * file_header = (void *)FILE_HEADER;
+    cpio_get_header_name(file_header);
 }
 

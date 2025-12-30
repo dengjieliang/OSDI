@@ -105,13 +105,16 @@ clean:
 # 7. QEMU 執行設定
 # ==========================================
 
-# 讓 QEMU 載入 bootloader.img
-QEMU_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -display none -serial null -serial tcp:127.0.0.1:8888,server
+# 1. 上面這段 (給 make qemu 用)
+# [新增] -initrd initramfs.cpio
+QEMU_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -initrd initramfs.cpio -display none -serial null -serial tcp:127.0.0.1:8888,server
 
 qemu: $(IMG_BOOT) $(IMG_KERNEL)
 	$(QEMU) $(QEMU_OPTS)
 
-QEMU_GDB_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
+# 2. 下面這段 (給 make qemu-gdb 用，這段對你最重要！)
+# [新增] -initrd initramfs.cpio
+QEMU_GDB_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -initrd initramfs.cpio -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
 
 qemu-gdb: $(IMG_BOOT) $(IMG_KERNEL)
 	$(QEMU) $(QEMU_GDB_OPTS)

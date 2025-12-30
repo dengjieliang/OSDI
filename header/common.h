@@ -22,6 +22,10 @@
     #define false 0
     #endif
 
+    #ifndef ALIGN4
+    #define ALIGN4(x) (((x) + 3) & ~3)
+    #endif
+
 #endif
 
 #define KERNEL_LOAD_ADDRESS 0x80000

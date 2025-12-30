@@ -1,7 +1,8 @@
 #include "../header/cpio.h"
 #include "../header/string.h"
-#include "common.h"
-#include "utils.h"
+#include "../header/utils.h"
+#include "../header/uart.h"
+#include "../header/common.h"
 
 typedef struct cpio_header
 {
@@ -22,17 +23,45 @@ typedef struct cpio_header
 
 } cpio_header_t;
 
-bool cpio_parse_newc_header(void *file_header)
+bool cpio_get_header_name(void *file_header)
 {
-    cpio_header_t* header = (struct cpio_header_t *)file_header;
-
-    if (strncmp(header->c_magic, "070701", 6) != 0)
+    while (1)
     {
-        return false;
-    }
+        cpio_header_t* header = (cpio_header_t *)file_header;
 
-    // 讀取 filesize
-    int size = hex2int(header->c_namesize, 8);
+        if (strncmp(header->c_magic, "070701", 6) != 0)
+        {
+            return false;
+        }
+
+        // 讀取 檔名 size
+        int file_name_size = hex2int(header->c_namesize, 8);
+        int file_size = hex2int(header->c_filesize, 8);
+        char* file_name_ptr = (char*)file_header;
+        
+        file_name_ptr = file_name_ptr + 110;
+
+        if (file_name_size == 11 && strncmp(file_name_ptr, "TRAILER!!!", 11) == 0)
+        {
+            break;
+        }
+        
+        for (int i = 0; i < file_name_size - 1; i++)
+        {
+            uart_send(*file_name_ptr);
+            file_name_ptr += 1;
+        }
+
+        //加上'/0'的位置
+        file_name_ptr += 1;
+        uart_puts("\n");
+
+        file_header = file_name_ptr;
+        unsigned long current_ptr = (unsigned long)file_header;
+        current_ptr = ALIGN4(current_ptr);
+        current_ptr = ALIGN4(current_ptr + file_size);
+        file_header = (void *)current_ptr;
+    }
 
     return true;
 }
