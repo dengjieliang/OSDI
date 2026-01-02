@@ -2,7 +2,7 @@
 #define SHELL_H
 
 
-typedef void(*CommandFunc)(void);
+typedef void(*CommandFunc)(int argc, char* argv[]);
 
 typedef struct Command
 {
@@ -12,7 +12,7 @@ typedef struct Command
 }Command_t;
 
 void shell_main();
-void execute_command(const char *cmd_name);
-const char* shell_input_line();
+void execute_command(int argc, char* argv[]);
+char* shell_input_line();
 
 #endif

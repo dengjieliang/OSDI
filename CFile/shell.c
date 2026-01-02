@@ -9,13 +9,16 @@
 
 static bool reboot_lock = false;
 
-static void cmd_hello(void);
-static void cmd_help(void);
-static void cmd_board_info(void);
-static void cmd_get_timer(void);
-static void cmd_reboot(void);
-static void cmd_cancel_reboot(void);
-static void cmd_get_file_header(void);
+static void cmd_hello(int argc, char* argv[]);
+static void cmd_help(int argc, char* argv[]);
+static void cmd_board_info(int argc, char* argv[]);
+static void cmd_get_timer(int argc, char* argv[]);
+static void cmd_reboot(int argc, char* argv[]);
+static void cmd_cancel_reboot(int argc, char* argv[]);
+static void cmd_get_file_header(int argc, char* argv[]);
+static void cmd_get_file_context(int argc, char* argv[]);
+
+static void split_command(int* argc, char* argv[]);
 
 static const Command_t commands[] = 
 {
@@ -26,8 +29,11 @@ static const Command_t commands[] =
     {"Reboot", "Reboot Computer", cmd_reboot},
     {"Cancel Reboot", "Cancel Reboot Computer", cmd_cancel_reboot},
     {"ls", "Get All File Header", cmd_get_file_header},
+    {"Get File Context", "Get File Context", cmd_get_file_context}
     {NULL, NULL} // Sentinel to mark the end of the array
 };
+
+static char input_buffer[128];
 
 void shell_main()
 {
@@ -35,16 +41,22 @@ void shell_main()
 
     while (1)
     {
-        const char* input_buffer = shell_input_line();
-        execute_command(input_buffer);
+        shell_input_line();
+        int argc = 0;
+        char* argv[MAX_ARGS];
+        
+        split_command(&argc, argv);
+
+        if (argc > 0)
+        {
+            execute_command(argc, argv);
+        }
     }
     
 }
 
-const char* shell_input_line()
+char* shell_input_line()
 {
-    static char input_buffer[128];
-
     int buffer_index = 0;
     
     uart_puts("[");
@@ -85,20 +97,50 @@ const char* shell_input_line()
     }
 }
 
+static void split_command(int* argc, char* argv[])
+{
+    *argc = 0;
+    char *cursor = input_buffer;
+
+    while (*cursor != '\0')
+    {
+        if (*cursor == ' ')
+        {
+            *cursor = '\0';
+            cursor += 1;
+            continue;
+        }
+
+        if (*argc >= MAX_ARGS)
+        {
+            uart_puts("Warning: Too many arguments, ignoring the rest.\n");
+            break;
+        }
+
+        argv[*argc] = cursor;
+        (*argc) += 1;
+
+        while (*cursor != ' ' && *cursor != '\0')
+        {
+            cursor += 1;
+        }       
+    }
+}
+
 // 在收到指令時遍歷所有命令，找到匹配的並執行
-void execute_command(const char *cmd_name)
+void execute_command(int argc, char* argv[])
 {
     for (int i = 0; commands[i].name != NULL; i++)
     {
-        if (reboot_lock && strcmp("Cancel Reboot", cmd_name) != 0)
+        if (reboot_lock && strcmp("Cancel Reboot", argv[0]) != 0)
         {
             uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
             return;
         }
 
-        if (strcmp(commands[i].name, cmd_name) == 0)
+        if (strcmp(commands[i].name, argv[0]) == 0)
         {
-            commands[i].func();
+            commands[i].func(argc, argv);
             return;
         }
     }
@@ -106,18 +148,24 @@ void execute_command(const char *cmd_name)
     const char *not_found_command_msg = "Command not found:";
     uart_puts("\n");
     uart_puts(not_found_command_msg);
-    uart_puts(cmd_name);
+    uart_puts(argv[0]);
     uart_puts("\n");
 }
 
-static void cmd_hello(void)
+static void cmd_hello(int argc, char* argv[])
 {
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
+
     const char *hello_text = "Hello, World!\n";
     uart_puts(hello_text);
 }
 
-static void cmd_help(void)
+static void cmd_help(int argc, char* argv[])
 {
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
+
     const char *hint_text = "Available commands:\n";
     uart_puts(hint_text);
 
@@ -131,8 +179,10 @@ static void cmd_help(void)
     }
 }
 
-static void cmd_board_info()
+static void cmd_board_info(int argc, char* argv[])
 {
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
 
     //寫入資料到MailBox Buffer
     prepare_board_revision_request();
@@ -156,14 +206,20 @@ static void cmd_board_info()
     }
 }
 
-static void cmd_get_timer()
+static void cmd_get_timer(int argc, char* argv[])
 {
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
+
     get_timetick();
     uart_puts("\n");
 }
 
-static void cmd_reboot()
+static void cmd_reboot(int argc, char* argv[])
 {
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
+
     // --- 新增這行 ---
     uart_puts("Rebooting in T-minus 2 seconds...\n"); //reboot前跳提示
     // ----------------
@@ -171,15 +227,21 @@ static void cmd_reboot()
     reboot_lock = true;
 }
 
-static void cmd_cancel_reboot()
+static void cmd_cancel_reboot(int argc, char* argv[])
 {
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
+
     cancel_reset();
     reboot_lock = false;
 }
 
-static void cmd_get_file_header(void)
+static void cmd_get_file_header(int argc, char* argv[])
 {
-    void * file_header = (void *)FILE_HEADER;
-    cpio_get_header_name(file_header);
+    (void)argc; // 防止編譯警告
+    (void)argv; // 防止編譯警告
+
+    void * header = (void *)FILE_HEADER;
+    CpioGetFilesHeaderName(header);
 }
 

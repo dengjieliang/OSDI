@@ -23,7 +23,7 @@ typedef struct cpio_header
 
 } cpio_header_t;
 
-bool cpio_get_header_name(void *file_header)
+bool CpioGetFilesHeaderName(void *file_header)
 {
     while (1)
     {

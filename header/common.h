@@ -26,6 +26,10 @@
     #define ALIGN4(x) (((x) + 3) & ~3)
     #endif
 
+    #ifndef MAX_ARGS
+    #define MAX_ARGS 16
+    #endif
+
 #endif
 
 #define KERNEL_LOAD_ADDRESS 0x80000
