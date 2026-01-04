@@ -23,45 +23,130 @@ typedef struct cpio_header
 
 } cpio_header_t;
 
-bool CpioGetFilesHeaderName(void *file_header)
+static void* GetNextHeader(void *file_header);
+static bool CompareFileName(cpio_header_t* file, char* cmp_name, int cmp_size);
+
+int CpioGetFilesHeaderName(void *file_header)
 {
+    cpio_header_t* header = (cpio_header_t *)file_header;
+
+    int file_count = 0;
+
+    if (strncmp(header->c_magic, "070701", 6) != 0)
+    {
+        return file_count;
+    }
+
     while (1)
     {
-        cpio_header_t* header = (cpio_header_t *)file_header;
-
-        if (strncmp(header->c_magic, "070701", 6) != 0)
-        {
-            return false;
-        }
-
-        // 讀取 檔名 size
         int file_name_size = hex2int(header->c_namesize, 8);
-        int file_size = hex2int(header->c_filesize, 8);
-        char* file_name_ptr = (char*)file_header;
-        
-        file_name_ptr = file_name_ptr + 110;
 
-        if (file_name_size == 11 && strncmp(file_name_ptr, "TRAILER!!!", 11) == 0)
+        if (file_name_size == 11 && 
+            CompareFileName(header, "TRAILER!!!", 
+                strlen("TRAILER!!!") ) == true)
         {
             break;
         }
+
+        char* filename_ptr = (char *)header + 110;
         
         for (int i = 0; i < file_name_size - 1; i++)
         {
-            uart_send(*file_name_ptr);
-            file_name_ptr += 1;
+            uart_send(*((char*)filename_ptr));
+            filename_ptr += 1;
         }
 
-        //加上'/0'的位置
-        file_name_ptr += 1;
-        uart_puts("\n");
+        file_count += 1;
+        file_header = GetNextHeader(file_header);
 
-        file_header = file_name_ptr;
-        unsigned long current_ptr = (unsigned long)file_header;
-        current_ptr = ALIGN4(current_ptr);
-        current_ptr = ALIGN4(current_ptr + file_size);
-        file_header = (void *)current_ptr;
+        if (file_header == NULL)
+        {
+            break;
+        }
+
+        header = (cpio_header_t *)file_header;
     }
 
-    return true;
+    return file_count;
+}
+
+bool CpioGetFileContext(void *file_header, char* file_name)
+{
+    cpio_header_t* header = (cpio_header_t *)file_header;
+
+    if (strncmp(header->c_magic, "070701", 6) != 0)
+    {
+        return false;
+    }
+
+    while(1)
+    {
+        //確保file的檔名和使用者輸入的完全相符合
+        if (CompareFileName(header, file_name, strlen(file_name) + 1 ))
+        {
+            int file_context_size = hex2int(header->c_filesize, 8);
+            int file_header_size = hex2int(header->c_namesize, 8);
+
+            header = (cpio_header_t*)((char *)header + 110);
+            header = (cpio_header_t*)((char *)header + file_header_size);
+
+            unsigned long current_ptr = (unsigned long)header;
+            current_ptr = ALIGN4(current_ptr);
+            char* file_content_ptr = (char *)current_ptr;
+
+            for (int i = 0; i < file_context_size; i++)
+            {
+                uart_send(*file_content_ptr);
+                file_content_ptr++;
+            }
+            uart_puts("\n");
+            return true;
+        }
+        else
+        {
+            file_header = GetNextHeader((void*)file_header);
+            
+            if (file_header == NULL)
+            {
+                break;
+            }
+            header = (cpio_header_t *)file_header;
+        }
+    }
+
+    return false;
+}
+
+static void* GetNextHeader(void *file_header)
+{
+    cpio_header_t* header = (cpio_header_t *)file_header;
+
+    // 讀取 檔名 size
+    int file_name_size = hex2int(header->c_namesize, 8);
+    int file_size = hex2int(header->c_filesize, 8);
+    
+    header = (cpio_header_t *)((char*)header + 110);
+
+    //加上檔案名稱長度
+    header = (cpio_header_t *)((char*)header + file_name_size);
+
+    unsigned long current_ptr = (unsigned long)header;
+    current_ptr = ALIGN4(current_ptr);
+    current_ptr = ALIGN4(current_ptr + file_size);
+    header = (void *)current_ptr;
+
+    if (strncmp(header->c_magic, "070701", 6) != 0)
+    {
+        return NULL;
+    }
+    else
+    {
+        return (void *)header;
+    }
+}
+
+static bool CompareFileName(cpio_header_t* file, char* cmp_name, int cmp_size)
+{    
+    file = (cpio_header_t *)((char*)file + 110);
+    return (strncmp((char*)file, cmp_name, cmp_size) == 0);
 }

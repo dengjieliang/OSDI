@@ -22,14 +22,14 @@ static void split_command(int* argc, char* argv[]);
 
 static const Command_t commands[] = 
 {
-    {"Hello", "Print Hello World", cmd_hello},
-    {"Help", "Show All Command", cmd_help},
-    {"Board Info", "Show Board Info", cmd_board_info},
-    {"Get Timer", "Show Now Timer", cmd_get_timer},
-    {"Reboot", "Reboot Computer", cmd_reboot},
-    {"Cancel Reboot", "Cancel Reboot Computer", cmd_cancel_reboot},
+    {"hello", "Print Hello World", cmd_hello},
+    {"help", "Show All Command", cmd_help},
+    {"info", "Show Board Info", cmd_board_info},
+    {"time", "Show Now Timer", cmd_get_timer},
+    {"reboot", "Reboot Computer", cmd_reboot},
+    {"cancel", "Cancel Reboot Computer", cmd_cancel_reboot},
     {"ls", "Get All File Header", cmd_get_file_header},
-    {"Get File Context", "Get File Context", cmd_get_file_context}
+    {"cat", "Get File Context", cmd_get_file_context},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -242,6 +242,34 @@ static void cmd_get_file_header(int argc, char* argv[])
     (void)argv; // 防止編譯警告
 
     void * header = (void *)FILE_HEADER;
-    CpioGetFilesHeaderName(header);
+    int file_count = CpioGetFilesHeaderName(header);
+
+    if (file_count <= 0)
+    {
+        uart_puts("Not Find Any File.");
+    }
+}
+
+static void cmd_get_file_context(int argc, char* argv[])
+{
+    if (argc < 2)
+    {
+        uart_puts("Please Enter FileName");
+        return;
+    }
+    else if (argc != 2)
+    {
+        uart_puts("False Argument");
+        return;
+    }
+
+    void * header = (void *)FILE_HEADER;
+    bool find_context_result = CpioGetFileContext(header, argv[1]);
+
+    if (find_context_result == false)
+    {
+        uart_puts("Cannot Find File");
+        return;
+    }
 }
 

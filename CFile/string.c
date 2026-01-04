@@ -1,4 +1,5 @@
 #include "../header/string.h"
+#include "../header/common.h"
 
 // 比較兩個字串是否相等
 int strcmp(const char* s1, const char* s2)
@@ -32,6 +33,11 @@ int strncmp(const char *s1, const char *s2, unsigned long read_byte)
         {
             break;
         }
+
+        if (s1_tmp == '\0')
+        {
+            return 0;
+        }
     }
 
     //防止overflow轉成unsigned char
@@ -39,13 +45,62 @@ int strncmp(const char *s1, const char *s2, unsigned long read_byte)
 }
 
 // 計算字串長度
-int strlen(const char *s)
+unsigned long strlen(const char *s)
 {
-    int length = 0;
-    while (*s != '\0')
+    int max_size = MAX_STRING_SIZE;
+    unsigned long length = 0;
+    const char* char_ptr = s;
+    const unsigned long* long_ptr;
+
+    if (char_ptr == 0)
     {
-        length++;
-        s++;
+        return length;
     }
+
+    while(((unsigned long)char_ptr & 7) != 0)
+    {
+        if (*char_ptr == '\0') 
+        {
+            return length;
+        }
+
+        char_ptr += 1;
+        length += 1;
+    }
+
+    long_ptr = (const unsigned long *)char_ptr;
+
+    // 準備 64-bit 的魔法數字
+    unsigned long himagic = 0x8080808080808080UL;
+    unsigned long lomagic = 0x0101010101010101UL;
+    
+    for (; length < max_size; length += 8)
+    {
+        int has_end = (*long_ptr - lomagic) & (~(*long_ptr)) & himagic;
+
+        if (has_end)
+        {
+            break;
+        }
+
+        long_ptr += 1;
+    }
+
+    char_ptr = (const char *)long_ptr;
+
+    if (length < max_size)
+    {
+        while (length < max_size) 
+        {
+            if (*char_ptr == '\0')
+            {
+                return length;
+            } 
+            
+            char_ptr++;
+            length++;
+        }
+    }
+
     return length;
 }

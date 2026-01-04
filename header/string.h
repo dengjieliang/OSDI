@@ -3,6 +3,6 @@
 
 int strcmp(const char *s1, const char *s2);
 int strncmp(const char *s1, const char *s2, unsigned long read_byte);
-int strlen(const char *s);
+unsigned long strlen(const char *s);
 
 #endif

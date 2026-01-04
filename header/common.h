@@ -30,6 +30,10 @@
     #define MAX_ARGS 16
     #endif
 
+    #ifndef MAX_STRING_SIZE
+    #define MAX_STRING_SIZE 1024
+    #endif
+
 #endif
 
 #define KERNEL_LOAD_ADDRESS 0x80000

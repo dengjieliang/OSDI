@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build Kernel",
+            "label": "Build All",
             "type": "shell",
             "command": "make",
             "args": ["all"],
@@ -13,20 +13,20 @@
             "problemMatcher": ["$gcc"]
         },
         {
-            "label": "Clean",
+            "label": "Start QEMU (GDB Mode)",
             "type": "shell",
-            "command": "make",
-            "args": ["clean"],
-            "problemMatcher": []
-        },
-        {
-            "label": "Start QEMU (Background)",
-            "type": "shell",
-            // [關鍵修正]：啟動前先強制殺掉舊的 QEMU
-            // "|| true" 的意思是：就算沒找到 QEMU 可以殺 (第一字執行時)，也不要報錯，繼續往下執行
-            "command": "pkill -9 qemu-system-aarch64 || true && make qemu-gdb",
             "isBackground": true,
-            "dependsOn": "Build Kernel",
+            // 強制殺掉舊的 QEMU，重新編譯，然後啟動新的
+            "command": "pkill -9 qemu-system-aarch64 || true && make qemu-gdb",
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            },
+            // 這個設定讓 VS Code 知道 QEMU 已經啟動完畢，可以開始連 GDB
             "problemMatcher": {
                 "pattern": [
                     {
@@ -41,7 +41,8 @@
                     "beginsPattern": "^.*qemu-system-aarch64", 
                     "endsPattern": "^.*$" 
                 }
-            }
+            },
+            "dependsOn": "Build All"
         }
     ]
 }
