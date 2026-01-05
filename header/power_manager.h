@@ -8,6 +8,6 @@
 #define PM_WDOG (MMIO_BASE + 0x00100024)
 
 void reset(int tick);
-void cancel_reset(void);
+void cancel_reset();
 
 #endif
