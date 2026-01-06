@@ -105,16 +105,19 @@ clean:
 # 7. QEMU 執行設定
 # ==========================================
 
-# 1. 上面這段 (給 make qemu 用)
-# [新增] -initrd initramfs.cpio
-QEMU_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -initrd initramfs.cpio -display none -serial null -serial tcp:127.0.0.1:8888,server
+# 定義 DTB 檔案名稱 (方便管理)
+DTB_FILE := bcm2710-rpi-3-b-plus.dtb
+
+# 1. make qemu 用
+# [新增] -dtb $(DTB_FILE)
+QEMU_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -initrd initramfs.cpio -dtb $(DTB_FILE) -display none -serial null -serial tcp:127.0.0.1:8888,server
 
 qemu: $(IMG_BOOT) $(IMG_KERNEL)
 	$(QEMU) $(QEMU_OPTS)
 
-# 2. 下面這段 (給 make qemu-gdb 用，這段對你最重要！)
-# [新增] -initrd initramfs.cpio
-QEMU_GDB_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -initrd initramfs.cpio -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
+# 2. make qemu-gdb 用
+# [新增] -dtb $(DTB_FILE)
+QEMU_GDB_OPTS := -machine raspi3b -kernel $(IMG_BOOT) -initrd initramfs.cpio -dtb $(DTB_FILE) -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
 
 qemu-gdb: $(IMG_BOOT) $(IMG_KERNEL)
 	$(QEMU) $(QEMU_GDB_OPTS)

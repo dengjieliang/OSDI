@@ -6,6 +6,7 @@
 #include "../header/power_manager.h"
 #include "../header/time.h"
 #include "../header/cpio.h"
+#include "../header/allocator.h"
 
 static bool reboot_lock = false;
 

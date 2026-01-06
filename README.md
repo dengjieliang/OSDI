@@ -2233,7 +2233,7 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
 
 **目標**：實作一個簡單的動態記憶體配置 (malloc)，供後續 DTB 解析使用。
 
-- [ ] 步驟 2.1：實作配置器
+- [x] 步驟 2.1：實作配置器
 
 - **檔案**：`header/allocator.h` (新建立)
     
@@ -2258,7 +2258,7 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
             4. (選做) 考慮 Alignment，確保回傳的指標是 8-byte 或 16-byte 對齊。
                 
 
-- [ ] 步驟 2.2：整合測試
+- [x] 步驟 2.2：整合測試
 
 - **檔案**：`CFile/kernel_main.c`
     
@@ -2271,7 +2271,7 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
 
 **目標**：不再 Hardcode 硬體位址，而是從 Bootloader 傳遞的 DTB 檔案中解析資訊 (如 initramfs 的位址)。
 
-- [ ] 步驟 3.1：準備與載入 DTB
+- [x] 步驟 3.1：準備與載入 DTB
 
 - **動作**：下載 RPi3 的 `.dtb` 檔案 (例如 `bcm2710-rpi-3-b-plus.dtb`)。
     

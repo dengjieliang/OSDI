@@ -22,18 +22,22 @@
     #define false 0
     #endif
 
-    #ifndef ALIGN4
-    #define ALIGN4(x) (((x) + 3) & ~3)
-    #endif
+#endif
 
-    #ifndef MAX_ARGS
-    #define MAX_ARGS 16
-    #endif
+#ifndef ALIGN4
+#define ALIGN4(x) (((x) + 3) & ~3)
+#endif
 
-    #ifndef MAX_STRING_SIZE
-    #define MAX_STRING_SIZE 1024
-    #endif
+#ifndef ALIGN8
+#define ALIGN8(x) (((x) + 7) & ~7)
+#endif
 
+#ifndef MAX_ARGS
+#define MAX_ARGS 16
+#endif
+
+#ifndef MAX_STRING_SIZE
+#define MAX_STRING_SIZE 1024
 #endif
 
 #define KERNEL_LOAD_ADDRESS 0x80000
