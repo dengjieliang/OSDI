@@ -1839,7 +1839,8 @@ Kernel 的 linker script：定義 kernel 的 link address、section 佈局、`.b
 - 同 `linker_boot.ld`：主要支援 early boot、BSS、stack，未額外規劃 heap/更細緻的記憶體映射。
 
 # 16. VSCode設定 (VS Code Configuration)
-## `launch.json`
+
+## launch.json
 
 ### 檔案定位
 
@@ -1849,244 +1850,96 @@ VS Code 的 **Debug 設定檔**：定義可在 VS Code 內啟動/連線 GDB 的�
 
 此檔案目前包含 **2 個 debug configuration**：
 
-#### 1) `OSDI: Manual Debug`
+#### 1) `OSDI: Debug Lab2 (stable handshake)`
 
-- **用途**：用 `gdb-multiarch` 連到 `127.0.0.1:1234` 的 GDB server（通常對應 `qemu-system-aarch64 -s -S`）。
-    
+- **用途**：用 `gdb-multiarch` 連到 `127.0.0.1:1234` 的 GDB server，並在啟動/結束除錯流程時自動呼叫 VS Code task 來啟動/停止 QEMU。
 - 主要欄位（就現況）：
     
     - `type: "cppdbg"`、`request: "launch"`、`MIMode: "gdb"`
-        
-    - `program: "${workspaceFolder}/build/bootloader.elf"`
-        
-        - 指定 symbols/ELF 來源為 workspace 下的 `build/bootloader.elf`
-            
+    - `program: "${workspaceFolder}/build/bootloader.elf"`：symbols/ELF 來源指定為 workspace 下的 `build/bootloader.elf`
     - `miDebuggerPath: "/usr/bin/gdb-multiarch"`
-        
     - `miDebuggerServerAddress: "127.0.0.1:1234"`
+    - `preLaunchTask: "Start QEMU (GDB Mode)"`：開始除錯前先啟動 QEMU（含建置與等待 port ready 的流程，詳見 `tasks.json`）
+    - `postDebugTask: "Stop QEMU"`：結束除錯後清掉 QEMU process
+    - `stopAtConnect: true`：連上 GDB server 後先停住（便於確認符號載入與中斷點是否生效）
+    - `setupCommands`（啟動後自動送進 gdb）：
         
-    - `cwd: "${workspaceFolder}"`
-        
-    - `externalConsole: false`
-        
-    - `stopAtEntry: false`
-        
-    - `setupCommands`：
-        
-        - `-enable-pretty-printing`
-            
-        - `set architecture aarch64`
-            
-
+        - `set architecture aarch64`：固定 target 架構為 AArch64
+        - `break kernel_main`：預先掛上 `kernel_main` 中斷點（若符號尚未就緒則允許失敗）
+        - `add-symbol-file ${workspaceFolder}/build/kernel8.elf 0x80000`：把 kernel 的 symbols 對應到 `0x80000`（便於進 kernel 後能正確看回呼叫堆疊/對應原始碼）
 #### 2) `C/C++ Runner: Debug Session`
 
 - **用途**：另一個 `cppdbg` 的 debug session（看起來是由某個 VS Code extension/工具自動生成的組態）。
+- 主要特徵（就現況）：
     
-- 主要欄位（就現況）：
-    
-    - `request: "launch"`
-        
-    - `cwd: "/home/marginal/osdi-wsl-starter/osdi-lab0/CFile"`
-        
-    - `program: "/home/marginal/osdi-wsl-starter/osdi-lab0/CFile/build/Debug/outDebug"`
-        
-    - `miDebuggerPath: "gdb"`
-        
-    - `setupCommands`：
-        
-        - `-enable-pretty-printing`
-            
+    - 使用 **絕對路徑**：`cwd` 與 `program` 直接寫死在 `/home/marginal/...`
+    - `miDebuggerPath: "gdb"`，並僅做 `-enable-pretty-printing`
 
 ### 目前的限制/假設（就現況描述）
 
-- `OSDI: Manual Debug` 依賴本機存在 `/usr/bin/gdb-multiarch`，且 `127.0.0.1:1234` 有啟動中的 GDB server。
-    
+- `OSDI: Debug Lab2 (stable handshake)` 依賴本機存在 `/usr/bin/gdb-multiarch`，且 QEMU 有開啟並監聽 `127.0.0.1:1234`（此部分會透過 `preLaunchTask` 觸發 `tasks.json` 來啟動）。
 - `C/C++ Runner: Debug Session` 使用**絕對路徑**（`/home/marginal/...`）；在不同機器/不同 workspace 路徑下不一定可直接使用（這是目前檔案中的狀態）。
-    
 
 ---
-
 ## `tasks.json`
 
 ### 檔案定位
-
-VS Code 的 **Task 設定檔**：定義可在 VS Code 內執行的建置與啟動命令（build、啟動 QEMU 等），並可提供給 debug pre-launch 依賴使用。
-
-> 檔案中包含 `// ...` 註解，屬於 VS Code 支援的 JSON with Comments（JSONC）用法。
-
+VS Code 的 **Task 設定檔**：定義可在 VS Code 內執行的建置與啟動命令（build、啟動/停止 QEMU 等），並可提供給 debug pre-launch / post-debug 依賴使用。
 ### 目前提供的功能（現有 tasks）
 
-此檔案目前定義 **2 個 tasks**：
-
+此檔案目前定義 **3 個 tasks**：
 #### 1) `Build All`
 
 - **用途**：呼叫 Makefile 進行全量建置。
-    
 - 內容（就現況）：
-    
-    - `type: "shell"`
-        
-    - `command: "make"`
-        
-    - `args: ["all"]`
-        
-    - `group`：
-        
-        - `kind: "build"`
-            
-        - `isDefault: true`（預設 build task）
-            
+    - `command: "make"`、`args: ["all"]`
+    - `group.kind: "build"` 且 `isDefault: true`（預設 build task）
     - `problemMatcher: ["$gcc"]`（使用 VS Code 內建 gcc matcher 顯示編譯錯誤/警告）
-        
-
 #### 2) `Start QEMU (GDB Mode)`
 
-- **用途**：啟動 QEMU 的 gdb 模式（背景執行），並在啟動前清掉舊的 QEMU。
-    
+- **用途**：啟動 QEMU 的 gdb 模式（背景執行），並在啟動前清掉舊的 QEMU；同時等待除錯所需的 port ready，讓後續 debug attach 更穩定。
 - 內容（就現況）：
-    
-    - `type: "shell"`
-        
     - `isBackground: true`（視為背景任務）
+    - `command: "bash"` + `args: ["-lc", "..."]`：以 bash 執行一段整合腳本
+    - 腳本行為（摘要）：
         
-    - `command`：
-        
-        - `pkill -9 qemu-system-aarch64 || true && make qemu-gdb`
-            
-        - 行為包含：
-            
-            1. 強制終止舊的 `qemu-system-aarch64`（若不存在則忽略錯誤）
-                
-            2. 執行 `make qemu-gdb`
-                
-    - `presentation`：
-        
-        - `echo: true`
-            
-        - `reveal: "silent"`
-            
-        - `focus: false`
-            
-        - `panel: "shared"`
-            
-        - `showReuseMessage: false`
-            
-        - `clear: true`
-            
-    - `problemMatcher`（自訂）：
-        
-        - `pattern.regexp: "."`（基本占位 pattern）
-            
-        - `background.activeOnStart: true`
-            
-        - `background.beginsPattern: "^.*qemu-system-aarch64"`
-            
-        - `background.endsPattern: "^.*$"`
-            
-        - 用於讓 VS Code 判定該背景任務「已開始可供後續流程使用」
-            
-    - `dependsOn: "Build All"`（啟動 QEMU 前先執行建置）
-        
+        1. `pkill -9 qemu-system-aarch64 || true`：強制終止舊的 QEMU（若不存在則忽略錯誤）
+        2. `(make qemu-gdb > build/qemu-gdb.log 2>&1) &`：背景啟動 `make qemu-gdb`，並把輸出寫到 `build/qemu-gdb.log`
+        3. 以 `/dev/tcp/127.0.0.1/$p` 輪詢等待 `1234` 與 `8888` port ready；未 ready 則直接失敗退出
+    - `problemMatcher.background`：
+        - `beginsPattern: "^__QEMU_START__$"`、`endsPattern: "^__QEMU_READY__$"`：用明確 marker 讓 VS Code 判定「背景任務已可供後續 debug attach 使用」
+    - `dependsOn: "Build All"`：啟動 QEMU 前會先完成建置
+
+#### 3) `Stop QEMU`
+
+- **用途**：結束除錯後清掉 QEMU process（對應 `launch.json` 的 `postDebugTask`）。
+- 內容（就現況）：`pkill -9 qemu-system-aarch64 || true`
 
 ### 目前的限制/假設（就現況描述）
 
-- `Start QEMU (GDB Mode)` 假設環境中存在 `pkill`、以及 Makefile 提供 `qemu-gdb` 目標。
-    
-- `problemMatcher.background` 的結束條件 `endsPattern: "^.*$"` 會在遇到任一行輸出即可能判定結束（這是目前檔案的設定狀態）。
-    
+- `Start QEMU (GDB Mode)` 假設環境中存在：
+    - `bash`，且支援 `/dev/tcp/...` 這種 TCP 輪詢寫法（常見於 Linux bash）
+    - `pkill`、`make`，以及 Makefile 提供 `qemu-gdb` 目標
+- 若 `1234` 或 `8888` 無法在指定時間內 ready，task 會直接失敗（屬於目前腳本設計）。
 
 ---
-
 ## `settings.json`
 
 ### 檔案定位
 
 VS Code 的工作區設定檔：此檔案目前主要是針對 **`C_Cpp_Runner`**（一個 VS Code extension）設定編譯器、除錯器、警告旗標、搜尋排除等行為。
 
+settings
+
 ### 目前提供的功能（現有設定）
 
-#### 1) 編譯器 / 除錯器路徑
-
-- `C_Cpp_Runner.cCompilerPath: "gcc"`
-    
-- `C_Cpp_Runner.cppCompilerPath: "g++"`
-    
-- `C_Cpp_Runner.debuggerPath: "gdb"`
-    
-
-#### 2) 語言標準 / MSVC 相關（現況為未指定或停用）
-
-- `C_Cpp_Runner.cStandard: ""`
-    
-- `C_Cpp_Runner.cppStandard: ""`
-    
-- `C_Cpp_Runner.useMsvc: false`
-    
-- `C_Cpp_Runner.msvcBatchPath: ""`
-    
-- `C_Cpp_Runner.msvcSecureNoWarnings: false`
-    
-
-#### 3) 警告旗標
-
-- GCC/Clang 警告（`C_Cpp_Runner.warnings`）目前包含：
-    
-    - `-Wall`, `-Wextra`, `-Wpedantic`, `-Wshadow`, `-Wformat=2`,
-        
-    - `-Wcast-align`, `-Wconversion`, `-Wsign-conversion`, `-Wnull-dereference`
-        
-- MSVC 警告（`C_Cpp_Runner.msvcWarnings`）目前包含：
-    
-    - `/W4`, `/permissive-`, `/w14242`, `/w14287`, `/w14296`, `/w14311`,
-        
-    - `/w14826`, `/w44062`, `/w44242`, `/w14905`, `/w14906`, `/w14263`,
-        
-    - `/w44265`, `/w14928`
-        
-- 其他警告控制：
-    
-    - `C_Cpp_Runner.enableWarnings: true`
-        
-    - `C_Cpp_Runner.warningsAsError: false`
-        
-
-#### 4) 編譯/連結額外參數（目前為空）
-
-- `C_Cpp_Runner.compilerArgs: []`
-    
-- `C_Cpp_Runner.linkerArgs: []`
-    
-
-#### 5) Include 設定（目前為空或全量搜尋）
-
-- `C_Cpp_Runner.includePaths: []`
-    
-- `C_Cpp_Runner.includeSearch: ["*", "**/*"]`
-    
-
-#### 6) 排除搜尋路徑
-
-- `C_Cpp_Runner.excludeSearch` 目前排除：
-    
-    - `**/build`, `**/build/**`
-        
-    - `**/.*`, `**/.*/**`
-        
-    - `**/.vscode`, `**/.vscode/**`
-        
-
-#### 7) Sanitizer 與其他編譯選項（現況皆停用）
-
-- `C_Cpp_Runner.useAddressSanitizer: false`
-    
-- `C_Cpp_Runner.useUndefinedSanitizer: false`
-    
-- `C_Cpp_Runner.useLeakSanitizer: false`
-    
-- `C_Cpp_Runner.showCompilationTime: false`
-    
-- `C_Cpp_Runner.useLinkTimeOptimization: false`
-    
+- 編譯器/除錯器路徑（就現況）：
+    - `C_Cpp_Runner.cCompilerPath: "gcc"`
+    - `C_Cpp_Runner.cppCompilerPath: "g++"`
+    - `C_Cpp_Runner.debuggerPath: "gdb"`
+- 警告旗標已啟用，並列出一組偏嚴格的 warning 組合（如 `-Wall/-Wextra/-Wpedantic/...`）。
+- 搜尋排除路徑（避免掃到 build 與隱藏資料夾、`.vscode` 等）。
+- Sanitizer / LTO / compilation time 等選項目前皆停用。
 
 ### 目前的限制/假設（就現況描述）
 
@@ -2097,63 +1950,18 @@ VS Code 的工作區設定檔：此檔案目前主要是針對 **`C_Cpp_Runner`*
 
 ### 檔案定位
 
-VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設定檔，主要用來指定：
-
-- include 搜尋路徑（讓 VS Code 能找到標頭檔、提供補全與錯誤提示）
-    
-- compiler 路徑與 IntelliSense 模式（決定解析器採用的 target/語法/預設巨集等）
-    
-- C/C++ 語言標準（此檔案目前使用預設值）
-    
-
+VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設定檔，主要用來指定 include 搜尋路徑、compiler 路徑、IntelliSense 模式與語言標準。
 ### 目前提供的功能（現有設定）
-
 此檔案目前包含 **1 個 configuration**：
-
 #### Configuration：`linux-gcc-x64`
-
-- `name: "linux-gcc-x64"`
-    
-    - 配置名稱（在 VS Code 中用來選取該組 IntelliSense 設定）。
-        
-- `includePath`
-    
-    - `["${workspaceFolder}/**", "/usr/include", "/usr/local/include"]`
-        
-    - 功能：
-        
-        - `${workspaceFolder}/**`：將整個 workspace 內的所有子目錄納入 include 搜尋（遞迴）。
-            
-        - `/usr/include`、`/usr/local/include`：納入系統與本機安裝的標準 include 位置。
-            
+- `includePath: ["${workspaceFolder}/**", "/usr/include", "/usr/local/include"]`
 - `compilerPath: "/usr/bin/gcc"`
-    
-    - 功能：指定 IntelliSense 用來推導預設 include、內建巨集與 target 設定的編譯器路徑（以 gcc 為基準）。
-        
 - `intelliSenseMode: "linux-gcc-x64"`
-    
-    - 功能：指定 IntelliSense 解析模式為 linux + gcc + x64（影響內建型別大小、預設巨集、解析器行為等）。
-        
-- `cStandard: "${default}"`、`cppStandard: "${default}"`
-    
-    - 功能：C/C++ 語言標準使用 extension 的預設值（此檔案目前未強制指定如 `c11`/`gnu11`/`c++17` 等）。
-        
-- `compilerArgs: [""]`
-    
-    - 功能：提供額外的編譯器參數給 IntelliSense 解析器使用。
-        
-    - 現況：陣列中只有空字串，等同於「沒有額外參數」的效果（以目前內容而言）。
-        
-
+- `cStandard/cppStandard` 目前使用 `${default}`；`compilerArgs` 目前等同無額外參數（只有空字串）。
 ### 目前的限制/假設（就現況描述）
 
-- 此配置的 `intelliSenseMode` 為 `linux-gcc-x64`，若你的實際目標是 **AArch64/裸機（freestanding）**，那麼 VS Code 的 IntelliSense 可能會以 x64/Linux 的預設模型解析，導致：
-    
-    - 部分 target-specific 內建巨集/型別大小/ABI 假設與實際不一致（就目前設定而言是可能發生的現象）。
-        
-- `includePath` 使用 `${workspaceFolder}/**` 會讓搜尋範圍非常廣；這是現有設定的行為，可能帶來較多索引成本（但檔案本身的功能就是如此配置）。
-    
-- 此檔案僅影響 VS Code 的語意分析/補全與診斷；不會直接改變你 Makefile 的實際編譯結果（除非你另有使用 VS Code extension 的 build 流程）。
+- 此組態的 `intelliSenseMode` 為 `linux-gcc-x64`，且 `compilerPath` 指向 `/usr/bin/gcc`；若你的實際 target 為 AArch64/bare-metal，IntelliSense 的內建巨集/型別模型可能與真實編譯環境不完全一致（這是目前檔案內容所呈現的狀態）。
+
 # Pending Tasks (待辦事項 - Lab 2)
 ## 依據 Lab 2 規格書，尚未完成的項目。
 

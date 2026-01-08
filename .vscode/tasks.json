@@ -1,48 +1,58 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "Build All",
-            "type": "shell",
-            "command": "make",
-            "args": ["all"],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "problemMatcher": ["$gcc"]
-        },
-        {
-            "label": "Start QEMU (GDB Mode)",
-            "type": "shell",
-            "isBackground": true,
-            // 強制殺掉舊的 QEMU，重新編譯，然後啟動新的
-            "command": "pkill -9 qemu-system-aarch64 || true && make qemu-gdb",
-            "presentation": {
-                "echo": true,
-                "reveal": "silent",
-                "focus": false,
-                "panel": "shared",
-                "showReuseMessage": false,
-                "clear": true
-            },
-            // 這個設定讓 VS Code 知道 QEMU 已經啟動完畢，可以開始連 GDB
-            "problemMatcher": {
-                "pattern": [
-                    {
-                        "regexp": ".",
-                        "file": 1,
-                        "location": 2,
-                        "message": 3
-                    }
-                ],
-                "background": {
-                    "activeOnStart": true,
-                    "beginsPattern": "^.*qemu-system-aarch64", 
-                    "endsPattern": "^.*$" 
-                }
-            },
-            "dependsOn": "Build All"
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build All",
+      "type": "shell",
+      "command": "make",
+      "args": ["all"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Start QEMU (GDB Mode)",
+      "type": "shell",
+      "isBackground": true,
+      "options": { "cwd": "${workspaceFolder}" },
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -e; pkill -9 qemu-system-aarch64 2>/dev/null || true; mkdir -p build; echo __QEMU_START__; (make qemu-gdb > build/qemu-gdb.log 2>&1) & QPID=$!; wait_listen(){ p=$1; for i in $(seq 1 400); do (echo > /dev/tcp/127.0.0.1/$p) >/dev/null 2>&1 && return 0; sleep 0.05; done; return 1; }; wait_listen 1234 || { echo \"Port 1234 not ready\" >&2; exit 1; }; wait_listen 8888 || { echo \"Port 8888 not ready\" >&2; exit 1; }; echo __QEMU_READY__; wait $QPID"
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      },
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": [
+          {
+            "regexp": "^(__VS_CODE_DO_NOT_MATCH_THIS__)(.*)$",
+            "kind": "file",
+            "file": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^__QEMU_START__$",
+          "endsPattern": "^__QEMU_READY__$"
         }
-    ]
+      },
+      "dependsOn": "Build All"
+    },
+    {
+      "label": "Stop QEMU",
+      "type": "shell",
+      "command": "bash",
+      "args": ["-lc", "pkill -9 qemu-system-aarch64 2>/dev/null || true"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
 }

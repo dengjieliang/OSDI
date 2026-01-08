@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "OSDI: Manual Debug",
+      "name": "OSDI: Debug Lab2 (stable handshake)",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/bootloader.elf",
@@ -11,7 +11,10 @@
       "miDebuggerPath": "/usr/bin/gdb-multiarch",
       "miDebuggerServerAddress": "127.0.0.1:1234",
       "externalConsole": false,
-      "stopAtEntry": false,
+      "preLaunchTask": "Start QEMU (GDB Mode)",
+      "postDebugTask": "Stop QEMU",
+      "stopAtConnect": true,
+      "launchCompleteCommand": "None",
       "setupCommands": [
         {
           "text": "-enable-pretty-printing",
@@ -19,6 +22,14 @@
         },
         {
           "text": "set architecture aarch64",
+          "ignoreFailures": false
+        },
+        {
+          "text": "break kernel_main",
+          "ignoreFailures": true
+        },
+        {
+          "text": "add-symbol-file ${workspaceFolder}/build/kernel8.elf 0x80000",
           "ignoreFailures": false
         }
       ]

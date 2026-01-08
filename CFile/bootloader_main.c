@@ -1,10 +1,8 @@
 #include "../header/common.h"
 #include "../header/uart.h"
 
-
-void kernel_main(void)
+void bootloader_main(void *dtb)
 {
-
     //第一次初始化，為了讓 Bootloader 能跟 Python 講話
     //將GPIO接到 mini uart
     uart_init();
@@ -26,4 +24,9 @@ void kernel_main(void)
     }
 
     ((void (*)(void))KERNEL_LOAD_ADDRESS)();
+}
+
+void kernel_main(void *dtb)
+{
+    bootloader_main(dtb);
 }
