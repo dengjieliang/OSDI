@@ -1,7 +1,7 @@
 #include "../header/uart.h"
 #include "../header/shell.h"
 
-void kernel_main(void)
+void kernel_main(void* dtb_addr)
 {
     // [新增] Kernel 的除錯鎖
     //volatile int lock = 1;

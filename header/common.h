@@ -40,7 +40,7 @@
 #define MAX_STRING_SIZE 1024
 #endif
 
-#define KERNEL_LOAD_ADDRESS 0x80000
+#define KERNEL_LOAD_ADDRESS 0x80000UL
 
 //MMIO base address
 #define MMIO_BASE       0x3F000000

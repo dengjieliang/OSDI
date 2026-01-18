@@ -1188,187 +1188,140 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-AArch64 的 early boot 程式（提供 `_start`）：負責  
--（必要時）將自身程式碼 **self-relocation** 到 linker 指定的 `_start` 位置
+此檔案提供 **Bootloader 與 Kernel 共用**的 ARM64 啟動流程（startup code），負責：
 
-- 設定 stack pointer
-    
-- 清零 `.bss`
-    
-- 呼叫 C 入口 `kernel_main()`
-    
-- 返回後進入 idle loop
-    
+- 接收 QEMU 透過 `x0` 傳入的 DTB 位址，並嘗試在後續流程中保留/傳遞
+- relocation：必要時將程式搬移到 linker 指定位址
+- 初始化 Stack Pointer（`sp`）
+- 清空 `.bss`
+- 跳轉到 C 語言入口 `kernel_main(...)`
+- 進入 idle loop 避免返回
 
-> 同一份 `boot.S` 同時被 bootloader 與 kernel 的連結流程使用（Makefile 會把 `boot.o` 放在兩邊的 object 清單最前面）；其最終的 link address 由各自的 linker script 決定。
+### 入口流程（`_start`）
 
-### 相依性（就現況）
+`_start` 的主要步驟如下（依程式碼順序）：
 
-- 連結腳本提供的符號：
-    
-    - `_start`, `_stack_top`, `__bss_start`, `__bss_end`
-        
-- 外部 C 入口：
-    
-    - `kernel_main`（以 `.extern kernel_main` 宣告）
-        
+1. **保留 DTB 位址**
+   - 進入 `_start` 時，`x0` 由 QEMU 放入 DTB 位址
+   - 先以 `mov x19, x0` 將 DTB 暫存到 `x19`（`x19` 屬於 callee-saved，適合作為跨呼叫保存用） :contentReference[oaicite:0]{index=0}
 
-### 目前提供的功能（實作）
+2. **呼叫 relocation**
+   - `bl relocate_kernel` :contentReference[oaicite:1]{index=1}
 
-#### 1) `_start`
+3. **設定 Stack Pointer**
+   - `ldr x3, =_stack_top` → `mov sp, x3` :contentReference[oaicite:2]{index=2}
 
-流程（依程式碼順序）：
+4. **清空 `.bss`**
+   - `x0 = __bss_start`, `x1 = __bss_end`
+   - `bl clear_bss` :contentReference[oaicite:3]{index=3}
 
-1. `bl relocate_kernel`：進行 self-relocation（若目前執行位址與 link 位址不同）
-    
-2. `ldr x3, =_stack_top` / `mov sp, x3`：設定 stack pointer 到 `_stack_top`
-    
-3. `ldr x0, =__bss_start`、`ldr x1, =__bss_end`：準備清 BSS 的參數
-    
-4. `bl clear_bss`：清零 `.bss`（以 8 bytes 為步進）
-    
-5. `bl kernel_main`：進入 C 世界的主入口
-    
-6. `b idle_loop`：避免返回後跑飛
-    
+5. **在呼叫 C 入口前，把 DTB 放回 `x0`**
+   - `mov x0, x19`
+   - `bl kernel_main` :contentReference[oaicite:4]{index=4}
 
-#### 2) `relocate_kernel`
+6. **避免返回**
+   - `b idle_loop`，用 `wfe` 無限等待 :contentReference[oaicite:5]{index=5} :contentReference[oaicite:6]{index=6}
 
-**目的：若 `_start` 的「目前執行位址」不等於「link-time 位址」，則搬移一段記憶體並跳到 link 位址繼續執行。**
+---
 
-核心邏輯（依現有指令）：
+### 子程序說明
 
-- `adr x0, _start`：取得 `_start` 的**目前執行位址**
-    
-- `ldr x1, =_start`：取得 `_start` 的**link-time 位址**
-    
-- 若 `x0 == x1`：直接 `_done: ret`
-    
-- 否則：
-    
-    - `ldr x2, =__bss_end`
-        
-    - `sub x2, x2, x1`：以 `(__bss_end - linked _start)` 計算要複製的 bytes 範圍（以 8-byte 步進）
-        
-    - 迴圈 `_relocate_loop`：
-        
-        - 若 `x2 == 0` 結束
-            
-        - `ldr x3, [x0], #8` 從來源讀 8 bytes
-            
-        - `str x3, [x1], #8` 寫到目的地 8 bytes
-            
-        - `sub x2, x2, #8` 遞減剩餘長度
-            
-    - `_relocate_loop_done`：
-        
-        - `ldr x1, =_start`
-            
-        - `br x1`：跳到 link-time `_start` 重新執行
-            
+#### 1) `relocate_kernel`
 
-> 就現有行為來看：複製範圍以 `linked _start` 到 `__bss_end` 為界，屬於「把程式與資料搬到 linker 指定位置」的做法；是否會包含 `.bss` 的內容不由此函式初始化（`.bss` 由 `clear_bss` 另行清零）。
+**目的：** 如果「程式實際載入位址」與「linker 設定位址」不同，就把程式搬到 linker 指定位址，最後跳回 `_start` 重新走一次流程。
 
-#### 3) `clear_bss`
+- 取得目前執行中的 `_start` 位址（runtime）：
+  - `adr x0, _start` :contentReference[oaicite:7]{index=7}
+- 取得 linker 指定的 `_start` 位址（linked）：
+  - `ldr x1, =_start` :contentReference[oaicite:8]{index=8}
+- 若相同（不需搬移）：
+  - `beq _done` → `ret` :contentReference[oaicite:9]{index=9} :contentReference[oaicite:10]{index=10}
+- 若不同（需要搬移）：
+  - 以 `__bss_end - linked _start` 計算搬移長度到 `x2`
+  - 以 8 bytes 為單位 `ldr/str` 搬移
+  - 搬完後 `br x1` 跳到 linker 設定的 `_start` :contentReference[oaicite:11]{index=11}
+
+> 就現有行為來看：複製範圍以 `linked _start` 到 `__bss_end` 為界，屬於「把程式與資料搬到 linker 指定位置」的做法；`.bss` 的初始化不由此函式負責（`.bss` 由 `clear_bss` 另行清零）。
+
+#### 2) `clear_bss`
 
 **目的：清零 `__bss_start` 到 `__bss_end`。**
 
-- 參數約定（依註解與實作）：
-    
-    - `x0 = start`, `x1 = end`
-        
+- 參數約定：
+  - `x0 = start`, `x1 = end` :contentReference[oaicite:12]{index=12}
 - 實作：
-    
-    - `mov x2, x0`：用 `x2` 當迴圈指標
-        
-    - `_bss_clear_loop`：
-        
-        - `cmp x2, x1`；若 `x2 >= x1` 跳 `_bss_clear_done`
-            
-        - `str xzr, [x2], #8`：寫入 0，指標加 8
-            
-        - 回到迴圈
-            
-    - `_bss_clear_done: ret`
-        
+  - `mov x2, x0` 用 `x2` 當迴圈指標 :contentReference[oaicite:13]{index=13}
+  - 迴圈中使用 `str xzr, [x2], #8` 以 8 bytes 為步進清零 :contentReference[oaicite:14]{index=14}
+  - 結束後 `ret` :contentReference[oaicite:15]{index=15}
 
-#### 4) `idle_loop`
+#### 3) `idle_loop`
 
-- `wfe`（等待事件）後無限迴圈，避免落入未知區域。
-    
+- `wfe`（等待事件）後無限迴圈，避免落入未知區域 :contentReference[oaicite:16]{index=16}
+
+---
 
 ### 目前的限制/假設（就現況描述）
+- `.bss` 清零以 8 bytes 步進，隱含假設 `__bss_start`/`__bss_end` 至少對齊到 8（而 linker script 通常會用 `ALIGN` 保障）。
+- relocation 以 8 bytes 複製；若長度非 8 的倍數，現況未見額外尾端處理（多半仰賴 linker 對齊策略）。
 
-- `.bss` 清零以 8 bytes 步進，隱含假設 `__bss_start`/`__bss_end` 至少對齊到 8（而 linker script 以 `ALIGN(16)` 對齊）。
-    
-- relocation 以 8 bytes 複製，並以 `__bss_end - linked _start` 計算長度；長度若非 8 的倍數，現況未見額外尾端處理（以目前腳本對齊策略通常可避免）。
+- **DTB 傳遞在 relocation 分支目前不完整：**
+  - `_start` 會先把 DTB 存在 `x19`，並在 `bl kernel_main` 前用 `mov x0, x19` 放回 `x0`（這段是正確 handoff） :contentReference[oaicite:17]{index=17}
+  - 但若發生 relocation，`_relocate_loop_done` 直接 `br x1` 跳回 `_start`，沒有在跳轉前把 `x0` 還原成 DTB；因此重新進 `_start` 時，`x0` 可能不是 DTB，導致 DTB 在 relocation 情境下遺失 :contentReference[oaicite:18]{index=18}
+
 
 # 11. 核心載入器邏輯(Kernel Loader Logic)
 ## `bootloader_main.c`
 
 ### 檔案定位
 
-Bootloader 的主流程（以 `kernel_main()` 為入口）：透過 UART 與 host 溝通，接收 kernel size 與 kernel image，將 kernel 寫入 `KERNEL_LOAD_ADDRESS` 後跳轉執行。
+Bootloader 的主流程（以 `kernel_main(void *dtb)` 為入口）：透過 UART 與 host 溝通，接收 kernel size 與 kernel image，將 kernel 寫入 `KERNEL_LOAD_ADDRESS` 後跳轉執行。
 
 ### 相依性（就現況）
 
 - `../header/common.h`
-    
-    - 使用：`KERNEL_LOAD_ADDRESS`
-        
-- `../header/uart.h`（你先前那版）
-    
-    - 使用：`uart_init()`, `uart_puts()`, `uart_recv_uint()`, `uart_send_hex()`, `uart_recv()`
-        
+  - 使用：`KERNEL_LOAD_ADDRESS`
+- `../header/uart.h`
+  - 使用：`uart_init()`, `uart_puts()`, `uart_recv_uint()`, `uart_send_hex()`, `uart_recv()`
 
 ### 目前提供的功能（實作）
 
-#### `void kernel_main(void)`
+#### `void kernel_main(void *dtb)`
 
 1. **初始化 UART**
-    
-    - 呼叫 `uart_init()`，確保 bootloader 能與 host 端通訊。
-        
+   - 呼叫 `uart_init()`，確保 bootloader 能與 host 端通訊。
+
 2. **握手/提示輸出**
-    
-    - 輸出：`"\r\nOSDI: Ready\r\n"`
-        
-    - 輸出：`"Bootloader: Waiting for Kernel size..."`
-        
+   - 輸出：`"\r\nOSDI: Ready\r\n"`
+   - 輸出：`"Bootloader: Waiting for Kernel size..."`
+
 3. **接收 kernel size（4 bytes）**
-    
-    - `unsigned int size = uart_recv_uint();`
-        
-    - `uart_send_hex(size);`（以 hex 回送 size，並在該函式內部換行）
-        
+   - `unsigned int size = uart_recv_uint();`
+   - `uart_send_hex(size);`（以 hex 回送 size）
+
 4. **提示開始接收 kernel**
-    
-    - 輸出：`"Bootloader: Waiting for Loding Kernel..."`
-        
+   - 輸出：`"Bootloader: Waiting for Loding Kernel..."`
+
 5. **接收 kernel image 並寫入固定載入位址**
-    
-    - `char* kernel_code = (char*)KERNEL_LOAD_ADDRESS;`
-        
-    - 迴圈 `i = 0..size-1`：
-        
-        - `c = uart_recv();`
-            
-        - `*kernel_code = c; kernel_code++;`
-            
+   - `char* kernel_code = (char*)KERNEL_LOAD_ADDRESS;`
+   - 迴圈 `i = 0..size-1`：
+     - `c = uart_recv();`
+     - `*kernel_code = c; kernel_code++;`
+
 6. **跳轉到 kernel entry**
-    
-    - `((void (*)(void))KERNEL_LOAD_ADDRESS)();`
-        
+   - 目前用：
+     - `((void (*)(void))KERNEL_LOAD_ADDRESS)();`
+   - 意味著「以無參數函式」的型態呼叫 kernel entry。
 
 ### 目前的限制/假設（就現況描述）
 
 - 假設 host 端會依序送入：
-    
-    1. `uart_recv_uint()` 可解析的 4 bytes size（此檔案以 little-endian 的 `uart_recv_uint()` 行為為依據）
-        
-    2. 緊接著送出 `size` bytes 的 kernel image
-        
+  1. `uart_recv_uint()` 可解析的 4 bytes size（依 `uart_recv_uint()` 的實作行為）
+  2. 緊接著送出 `size` bytes 的 kernel image
 - 此流程沒有檔案完整性檢查（checksum）、timeout、或錯誤復原；現況是「收到多少寫多少，寫完就跳」。
+- **DTB handoff（傳給載入後的 kernel）目前尚未完成：**
+  - `kernel_main` 雖然宣告了 `void *dtb` 參數（對應 startup code 會嘗試把 DTB 放在 `x0` 傳入），但目前 bootloader 內部沒有使用它。
+  - 跳轉 kernel 時使用 `void (*)(void)` 呼叫，代表編譯器不會幫你把 `dtb` 放進 `x0`；因此「載入後的 kernel」目前拿不到 DTB（除非 kernel 自己用其他方式取得）。
+  - 若要讓載入後的 kernel 收到 DTB，呼叫型態需改成「帶一個參數」的 function pointer（使編譯器依 AArch64 calling convention 將第一參數放入 `x0`），或在跳轉前用 inline asm 強制設定 `x0`。
 # 12. 作業系統核心主程式(Kernel Main)
 ## `kernel_main.c`
 
@@ -2088,7 +2041,7 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
 - **內容邏輯**：在 QEMU 指令加入 `-dtb bcm2710-rpi-3-b-plus.dtb`。
     
 
- - [ ] 步驟 3.2：修改 Bootloader 傳遞參數 (關鍵！)
+ - [x] 步驟 3.2：修改 Bootloader 傳遞參數 (關鍵！)
 
 - **原理**：QEMU 啟動時，會把 DTB 的記憶體位址放在 CPU 的 `x0` 暫存器。你需要一路把這個值傳給 Kernel。
     
@@ -2107,7 +2060,7 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
         - **跳轉修改**：在跳轉到 Kernel (`0x80000`) 之前，必須把 `dtb_addr` 放回 **`x0` 暫存器**。這無法用純 C 語言做，你需要寫一行 Inline Assembly (`asm volatile("mov x0, %0" :: "r"(dtb_addr));`)，然後再跳轉。
             
 
-- [ ] 步驟 3.3：修改 Kernel 接收參數
+- [x] 步驟 3.3：修改 Kernel 接收參數
 
 - **檔案**：`Assembly/boot.S` (Kernel 的)
     

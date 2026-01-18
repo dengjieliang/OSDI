@@ -1,6 +1,8 @@
 #include "../header/common.h"
 #include "../header/uart.h"
 
+typedef void (*kernel_entry_t)(void *);
+
 void bootloader_main(void *dtb)
 {
     //第一次初始化，為了讓 Bootloader 能跟 Python 講話
@@ -23,7 +25,11 @@ void bootloader_main(void *dtb)
         kernel_code++;
     }
 
-    ((void (*)(void))KERNEL_LOAD_ADDRESS)();
+    kernel_entry_t entry = (kernel_entry_t)KERNEL_LOAD_ADDRESS;
+    entry(dtb);
+
+    // 正常情況下 kernel 不會返回；告訴編譯器此處不可達（若返回則為未定義行為）
+    __builtin_unreachable();
 }
 
 void kernel_main(void *dtb)
