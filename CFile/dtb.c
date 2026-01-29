@@ -354,15 +354,21 @@ static void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth
 
 static bool PathEqualsBase(char* nodeStack[MAX_DEPTH], int depth, string_t segments[MAX_SEGMENT], int compareDepth)
 {
-    if (depth < compareDepth)
+    if (depth != compareDepth + 1)
     {
         return false;
     }
 
-    for (int i = 0; i <= compareDepth; i++)
+    for (int i = 0; i < compareDepth; i++)
     {
-        if (strncmp(nodeStack[i], segments[i].string_ptr, 
-            strcspn(nodeStack[i], '@', segments[i].size)) != 0)
+        int unit_size = strcspn(nodeStack[i + 1], '@', strlen(nodeStack[i + 1]));
+
+        if (unit_size != segments[i].size)
+        {
+            return false;
+        }
+
+        if (strncmp(nodeStack[i + 1], segments[i].string_ptr, segments[i].size) != 0)
         {
             return false;
         }
