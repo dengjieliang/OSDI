@@ -24,6 +24,11 @@ int strncmp(const char *s1, const char *s2, unsigned long read_byte)
     char s1_tmp;
     char s2_tmp;
 
+    if (read_byte == 0)
+    {
+        return 0;
+    }
+
     for (unsigned long i = 0; i < read_byte; i++)
     {
         s1_tmp = *(s1 + i);
@@ -42,6 +47,28 @@ int strncmp(const char *s1, const char *s2, unsigned long read_byte)
 
     //防止overflow轉成unsigned char
     return (unsigned char)s1_tmp - (unsigned char)s2_tmp;
+}
+
+unsigned int strcspn(const char *s, const char reject, int max_len)
+{
+    int i = 0;
+
+    while (i < max_len)
+    {
+        if (s[i] == '\0')
+        {
+            return i;
+        }
+
+        if (s[i] == reject)
+        {
+            return i;
+        }
+
+        i += 1;
+    }
+
+    return max_len;
 }
 
 // 計算字串長度

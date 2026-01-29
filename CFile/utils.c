@@ -71,15 +71,27 @@ static unsigned int makemask(int size, int shiftnumber)
     return mask;
 }
 
-unsigned int BigEndianToLittleEndian(void* byte, unsigned int n)
+unsigned int BigEndianToLittleEndian(void* byte)
 {
     unsigned int result = 0;
 
-    for (unsigned int i = 0; i < n; i++)
+    for (unsigned int i = 0; i < 4; i++)
     {
         result = result << 8;
         unsigned char* ptr = (unsigned char*)byte;
         result += *(ptr + i);
+    }
+
+    return result;
+}
+
+unsigned long long CombineByte(void* byte, unsigned int n)
+{
+    unsigned long long result = 0;
+
+    for (unsigned int i = 0; i < n; i += 1)
+    {
+        result = (result << 32) | BigEndianToLittleEndian(byte + (i * 4));
     }
 
     return result;
