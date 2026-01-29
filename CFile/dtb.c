@@ -345,7 +345,7 @@ static void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth
         ctx_dtb->initrd_start = Decode_Initrd_Addr(valuePtr, valueLength);
         ctx_dtb->have_initrd_start = true;
     }
-    else if (strcmp(nodeValueName, "linux,initrd-start") == 0)
+    else if (strcmp(nodeValueName, "linux,initrd-end") == 0)
     {
         ctx_dtb->initrd_end = Decode_Initrd_Addr(valuePtr, valueLength);
         ctx_dtb->have_initrd_end = true;
@@ -362,11 +362,13 @@ static bool PathEqualsBase(char* nodeStack[MAX_DEPTH], int depth, string_t segme
     for (int i = 0; i <= compareDepth; i++)
     {
         if (strncmp(nodeStack[i], segments[i].string_ptr, 
-            strcspn(nodeStack[i], '@', segments[i].size)) == false)
+            strcspn(nodeStack[i], '@', segments[i].size)) != 0)
         {
             return false;
         }
     }
+
+    return true;
 }
 
 static unsigned long Decode_Initrd_Addr(unsigned long valuePtr, unsigned int valueLength)
