@@ -1,4 +1,6 @@
+#include "../header/common.h"
 #include "../header/utils.h"
+#include "../header/string.h"
 
 static unsigned int makemask(int size, int shiftnumber);
 
@@ -91,7 +93,8 @@ unsigned long long CombineByte(void* byte, unsigned int n)
 
     for (unsigned int i = 0; i < n; i += 1)
     {
-        result = (result << 32) | BigEndianToLittleEndian(byte + (i * 4));
+        byte = (void*)((char*)byte + (i * 4));
+        result = (result << 32) | BigEndianToLittleEndian(byte);
     }
 
     return result;

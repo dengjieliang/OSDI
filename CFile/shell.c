@@ -7,6 +7,7 @@
 #include "../header/time.h"
 #include "../header/cpio.h"
 #include "../header/allocator.h"
+#include "fdtb.h"
 
 static bool reboot_lock = false;
 
@@ -242,7 +243,8 @@ static void cmd_get_file_header(int argc, char* argv[])
     (void)argc; // 防止編譯警告
     (void)argv; // 防止編譯警告
 
-    void * header = (void *)FILE_HEADER;
+    extern CtxT dtb_ctx;
+    void * header = (void *)dtb_ctx.initrd_start;
     int file_count = CpioGetFilesHeaderName(header);
 
     if (file_count <= 0)
@@ -264,7 +266,9 @@ static void cmd_get_file_context(int argc, char* argv[])
         return;
     }
 
-    void * header = (void *)FILE_HEADER;
+    extern CtxT dtb_ctx;
+
+    void * header = (void *)dtb_ctx.initrd_start;
     bool find_context_result = CpioGetFileContext(header, argv[1]);
 
     if (find_context_result == false)

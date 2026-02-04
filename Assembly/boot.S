@@ -17,6 +17,7 @@ _start:
     ldr x0, = __bss_start /*將bss起始地址載入 x0*/
     ldr x1, = __bss_end  /*將bss結尾地址載入 x1*/
     bl clear_bss         /*呼叫bss清零函式，使用bl的話，參數必須根據x0、x1、x2...順序擺放*/ 
+    mov x0, x19         /*將x19 變數搬回到x0*/
     bl kernel_main      /* 呼叫 kernel_main 函式 */
     b idle_loop       /* 呼叫 idle_loop 以避免返回 */
 

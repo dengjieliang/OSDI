@@ -3,43 +3,11 @@
 #include "../header/string.h"
 #include "common.h"
 
-#define MAX_MEM_REGIONS 256
-#define MAX_SEGMENT 256
-#define MAX_DEPTH 32
-#define MAX_REG_SIZE 256
-#define HANDLE_NODE_FUNCTION_MAX_SIZE 256
-
 #define FDT_BEGIN_NODE 0x00000001
 #define FDT_END_NODE 0x00000002
 #define FDT_PROP 0x00000003
 #define FDT_NOP 0x00000004
 #define FDT_END 0x00000009
-
-typedef enum NodeEvent
-{
-    ENTER_NODE,
-    PROP_NODE,
-    LEAVE_NODE,
-} NodeEnum;
-
-static void SaveChildCellAddr(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
-                            unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
-
-static void SaveChildCellSize(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
-                            unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
-
-static void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
-                            unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
-
-static void InitialDtbCtx();
-static void dispacherCallbackFunction(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                                    char* nodeValueName, 
-                                    unsigned long valuePtr, unsigned int valueLength);
-static bool PathEqualsBase(char* nodeStack[MAX_DEPTH], int depth, string_t segments[MAX_SEGMENT], int compareDepth);
-static unsigned long Decode_Initrd_Addr(unsigned long valuePtr, unsigned int valueLength);
 
 typedef struct dtb_struct
 {
@@ -56,57 +24,7 @@ typedef struct dtb_struct
 
 } DtbT;
 
-typedef struct mem_region
-{
-    unsigned long base;
-    unsigned long size;
-} MemRegionT;
-
-typedef struct node_state 
-{
-    int matched_driver_id;
-    MemRegionT reg_entries[MAX_REG_SIZE];
-    unsigned int valid_reg_count;
-} NodeStateT;
-
-typedef struct ctx
-{
-    //initramfs的開頭和結尾,kernel 要用它當作 initramfs（cpio archive）的位置起點
-    unsigned long initrd_start;
-    unsigned long initrd_end;
-    bool have_initrd_start;
-    bool have_initrd_end;
-
-    //獲得stdout 的目標節點路徑
-    string_t stdout_target_segments[MAX_SEGMENT];
-    unsigned int stdout_target_depth;
-    bool have_stdout_target;
-
-    //stdout 的目標節點內容(console UART 的 MMIO base/size)
-    unsigned long uart_mmio_base;
-    unsigned int uart_mmio_size;
-    bool have_uart_reg;
-
-    //記錄 RAM 的實體範圍
-    MemRegionT mem_regions[MAX_MEM_REGIONS];
-
-
-    unsigned int child_addr_cells[MAX_DEPTH];
-    unsigned int child_size_cells[MAX_DEPTH];
-    NodeStateT node_state[MAX_DEPTH];
-} CtxT;
-
-typedef void (*FdtHandleNodeFunction) (NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                                    char* nodeValueName, 
-                                    unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
-
-static CtxT dtb_ctx;
-static FdtHandleNodeFunction all_node_handler[HANDLE_NODE_FUNCTION_MAX_SIZE] = 
-{
-    SaveChildCellAddr, SaveChildCellSize, Initrd_Handler
-};
-
-bool ReadDTBFile(void* header)
+bool ReadDTBFile(void* header, FdtHandleNodeFunction callBack, void* user_data)
 {
     DtbT* dtb_header = (DtbT*)header;
     unsigned int magic = BigEndianToLittleEndian(&dtb_header->magic);
@@ -135,10 +53,9 @@ bool ReadDTBFile(void* header)
 
     int depth = 0;
     char* nodeStack[MAX_DEPTH];
-    InitialDtbCtx();
     unsigned long  cursor = struct_base;
 
-    while (cursor < struct_end)
+    while (cursor + 4 <= struct_end)
     {
         unsigned int token = BigEndianToLittleEndian((void*)cursor);
         cursor += 4;
@@ -151,15 +68,23 @@ bool ReadDTBFile(void* header)
             }
 
             nodeStack[depth] = (char*)(cursor);
+            
+            bool findNodeName = false;
 
-            while (*(char*)cursor != '\0')
+            while (cursor < struct_end)
             {
-                cursor += 1;
-
-                if (cursor > struct_end)
+                if (*(char*)cursor == '\0')
                 {
-                    return false;
+                    findNodeName = true;
+                    break;
                 }
+
+                cursor += 1;
+            }
+
+            if (findNodeName == false)
+            {
+                return false;
             }
 
             //加上\0.
@@ -169,10 +94,13 @@ bool ReadDTBFile(void* header)
 
             depth += 1;
 
+            callBack(ENTER_NODE, nodeStack, depth, nodeStack[depth - 1], 0, 0, user_data);
+
             continue;
         }
         else if (token == FDT_END_NODE)
         {
+            callBack(LEAVE_NODE, nodeStack, depth, nodeStack[depth - 1], 0, 0, user_data);
             depth -= 1;
 
             if (depth < 0)
@@ -186,6 +114,11 @@ bool ReadDTBFile(void* header)
         }
         else if (token == FDT_PROP)
         {
+            if (cursor + 8 > struct_end)
+            {
+                return false;
+            }
+
             unsigned int valueLength = BigEndianToLittleEndian((void*)cursor);
             cursor += 4;
             unsigned int nameoff = BigEndianToLittleEndian((void*)cursor);
@@ -216,14 +149,14 @@ bool ReadDTBFile(void* header)
 
             unsigned long valuePtr = cursor;
 
-            if (valuePtr + valueLength > struct_end)
+            if (valueLength > struct_end - valuePtr)
             {
                 return false;
             }
 
             cursor += valueLength;
             cursor = ALIGN4(cursor);
-            dispacherCallbackFunction(PROP_NODE, nodeStack, depth, nodeValueName, valuePtr, valueLength);
+            callBack(PROP_NODE, nodeStack, depth, nodeValueName, valuePtr, valueLength, user_data);
             continue;
         }
         else if (token == FDT_NOP)
@@ -232,7 +165,7 @@ bool ReadDTBFile(void* header)
         }
         else if (token == FDT_END)
         {
-            break;
+            return true;
         }
         else
         {
@@ -240,154 +173,5 @@ bool ReadDTBFile(void* header)
         }
     }
 
-    return true;
-}
-
-static void InitialDtbCtx()
-{
-    dtb_ctx.initrd_start = 0;
-    dtb_ctx.initrd_end = 0;
-    dtb_ctx.have_initrd_start = false;
-    dtb_ctx.have_initrd_end = false;
-
-    for (int i = 0; i < MAX_SEGMENT; i++)
-    {
-        dtb_ctx.stdout_target_segments[i].string_ptr = 0;
-        dtb_ctx.stdout_target_segments[i].size = 0;
-    }
-    dtb_ctx.stdout_target_depth = 0;
-    dtb_ctx.have_stdout_target = false;
-
-    dtb_ctx.uart_mmio_base = 0;
-    dtb_ctx.uart_mmio_size = 0;
-    dtb_ctx.have_uart_reg = false;
-    
-    for (int i = 0; i < MAX_MEM_REGIONS; i++)
-    {
-        dtb_ctx.mem_regions[i].base = 0;
-        dtb_ctx.mem_regions[i].size = 0;
-    }
-
-    for (int i = 0; i < MAX_DEPTH; i++)
-    {
-        dtb_ctx.child_addr_cells[i] = 0;
-        dtb_ctx.child_size_cells[i] = 0;
-        dtb_ctx.node_state[i].matched_driver_id = 0;
-
-        for (int j = 0; j < MAX_REG_SIZE; j++)
-        {
-            dtb_ctx.node_state[i].reg_entries[j].base = 0;
-            dtb_ctx.node_state[i].reg_entries[j].size = 0;
-        }
-
-        dtb_ctx.node_state[i].valid_reg_count = 0;
-    }
-}
-
-static void dispacherCallbackFunction(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                                    char* nodeValueName, 
-                                    unsigned long valuePtr, unsigned int valueLength)
-{
-    for (int i = 0; i < HANDLE_NODE_FUNCTION_MAX_SIZE; i++)
-    {
-        if (all_node_handler[i] != NULL)
-        {
-            all_node_handler[i](event, nodeStack, depth, nodeValueName, valuePtr, valueLength, &dtb_ctx);
-        }
-    }
-}
-
-static void SaveChildCellAddr(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
-                            unsigned long valuePtr, unsigned int valueLength, void* user_dtb)
-{
-    if (strcmp(nodeValueName, "#address-cells") != 0)
-    {
-        return;
-    }
-
-    unsigned int childCellAddr = BigEndianToLittleEndian((void*)valuePtr);
-    ((CtxT*)user_dtb)->child_addr_cells[depth] = childCellAddr;
-}
-
-static void SaveChildCellSize(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
-                            unsigned long valuePtr, unsigned int valueLength, void* user_dtb)
-{
-    if (strcmp(nodeValueName, "#size-cells") != 0)
-    {
-        return;
-    }
-
-    unsigned int childCellSize = BigEndianToLittleEndian((void*)valuePtr);
-    dtb_ctx.child_size_cells[depth] = childCellSize;
-}
-
-static void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
-                            unsigned long valuePtr, unsigned int valueLength, void* user_dtb)
-{
-    if (event != PROP_NODE)
-    {
-        return;
-    }
-
-    CtxT* ctx_dtb = (CtxT*)user_dtb;
-    ctx_dtb->stdout_target_segments[0].string_ptr = "chosen";
-    ctx_dtb->stdout_target_segments[0].size = 6;
-    if (PathEqualsBase(nodeStack, depth, ctx_dtb->stdout_target_segments, 0) == false)
-    {
-        return;
-    }
-
-    if (strcmp(nodeValueName, "linux,initrd-start") == 0)
-    {
-        ctx_dtb->initrd_start = Decode_Initrd_Addr(valuePtr, valueLength);
-        ctx_dtb->have_initrd_start = true;
-    }
-    else if (strcmp(nodeValueName, "linux,initrd-end") == 0)
-    {
-        ctx_dtb->initrd_end = Decode_Initrd_Addr(valuePtr, valueLength);
-        ctx_dtb->have_initrd_end = true;
-    }
-}
-
-static bool PathEqualsBase(char* nodeStack[MAX_DEPTH], int depth, string_t segments[MAX_SEGMENT], int compareDepth)
-{
-    if (depth != compareDepth + 1)
-    {
-        return false;
-    }
-
-    for (int i = 0; i < compareDepth; i++)
-    {
-        int unit_size = strcspn(nodeStack[i + 1], '@', strlen(nodeStack[i + 1]));
-
-        if (unit_size != segments[i].size)
-        {
-            return false;
-        }
-
-        if (strncmp(nodeStack[i + 1], segments[i].string_ptr, segments[i].size) != 0)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-static unsigned long Decode_Initrd_Addr(unsigned long valuePtr, unsigned int valueLength)
-{
-    if (valueLength == 4)
-    {
-        return (unsigned long)CombineByte((void*)valuePtr, 1);
-    }
-
-    if (valueLength == 8)
-    {
-        return (unsigned long)CombineByte((void*)valuePtr, 2);
-    }
-
-    return 0;
+    return false;
 }

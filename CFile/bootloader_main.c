@@ -1,9 +1,16 @@
 #include "../header/common.h"
 #include "../header/uart.h"
 
-typedef void (*kernel_entry_t)(void *);
 
-void bootloader_main(void *dtb)
+typedef void (*kernel_entry_t)(void *);
+static void bootloader_main(void *dtb);
+
+void kernel_main(void *dtb)
+{
+    bootloader_main(dtb);
+}
+
+static void bootloader_main(void *dtb)
 {
     //第一次初始化，為了讓 Bootloader 能跟 Python 講話
     //將GPIO接到 mini uart
@@ -30,9 +37,4 @@ void bootloader_main(void *dtb)
 
     // 正常情況下 kernel 不會返回；告訴編譯器此處不可達（若返回則為未定義行為）
     __builtin_unreachable();
-}
-
-void kernel_main(void *dtb)
-{
-    bootloader_main(dtb);
 }

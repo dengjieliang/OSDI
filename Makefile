@@ -28,7 +28,7 @@ s_ALL := $(wildcard Assembly/*.s)
 
 # 3. 分離 "共用檔"
 # 技巧：直接把上面定義的 main 檔案過濾掉，剩下的就是 uart.c, utils.c 等
-C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC), $(C_ALL))
+C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) CFile/shell.c, $(C_ALL))
 
 # ==========================================
 # 4. 定義 Object 檔案 (.o)
@@ -51,7 +51,7 @@ BOOT_START_OBJ := $(BUILD_DIR)/boot.o
 OBJS_FOR_BOOTLOADER := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/bootloader_main.o
 
 # Kernel = boot.o + 共用.o + kernel_main.o
-OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/kernel_main.o
+OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/shell.o $(BUILD_DIR)/kernel_main.o
 
 # ==========================================
 # 5. 定義輸出檔名

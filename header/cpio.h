@@ -3,8 +3,6 @@
 
 #include "../header/common.h"
 
-#define FILE_HEADER 0x8000000
-
 //獲取所有檔案名稱
 int CpioGetFilesHeaderName(void *file_header);
 
