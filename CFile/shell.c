@@ -29,7 +29,7 @@ static const Command_t commands[] =
     {"info", "Show Board Info", cmd_board_info},
     {"time", "Show Now Timer", cmd_get_timer},
     {"reboot", "Reboot Computer", cmd_reboot},
-    {"cancel", "Cancel Reboot Computer", cmd_cancel_reboot},
+    {"cancel reboot", "Cancel Reboot Computer", cmd_cancel_reboot},
     {"ls", "Get All File Header", cmd_get_file_header},
     {"cat", "Get File Context", cmd_get_file_context},
     {NULL, NULL} // Sentinel to mark the end of the array
@@ -134,7 +134,7 @@ void execute_command(int argc, char* argv[])
 {
     for (int i = 0; commands[i].name != NULL; i++)
     {
-        if (reboot_lock && strcmp("Cancel Reboot", argv[0]) != 0)
+        if (reboot_lock && strcmp("cancel reboot", argv[0]) != 0)
         {
             uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
             return;

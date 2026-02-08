@@ -436,6 +436,12 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
 - `int hex2int(char *hex, int n);`
     
+- `unsigned int reverseint(unsigned int number);`
+    
+- `unsigned int BigEndianToLittleEndian(void* byte);`
+    
+- `unsigned long long CombineByte(void* byte, unsigned int n);`
+    
 
 ---
 
@@ -475,8 +481,120 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 > 現況注意：條件是用 `>= 'a'` / `>= 'A'`，沒有額外限制到 `'f'`/`'F'`；若輸入含非預期字元，仍會被某個分支吃掉並產生結果（函式本身不做合法性檢查）。
 
+#### `unsigned int reverseint(unsigned int number)`
 
-# 6. CPIO 檔案系統解析器 (CPIO Parser)
+- 功能：將 `number` 的 bit 序做反轉（bit-reversal）。
+    
+- 作法（就目前實作）：
+    
+    - 以 `number_size = sizeof(number) * 8` 取得 bit 寬度
+        
+    - 迴圈令 `bit = 1, 2, 4, ...`，逐輪以遮罩將相鄰區塊交換（swap bit blocks）
+        
+    - 遮罩由內部 helper `makemask(size, shiftnumber)` 產生
+        
+- 回傳反轉後的 `number`。
+    
+
+> 現況注意：bit 寬度取決於 `unsigned int` 實際大小（常見為 32-bit，但依平台/編譯器而定）；此函式會跟著 `sizeof(unsigned int)` 的結果改變反轉範圍。
+
+#### `unsigned int BigEndianToLittleEndian(void* byte)`
+
+- 功能：將 `byte` 指向的 **4 bytes** 視為 big-endian 序列，組成一個 `unsigned int` 數值。
+    
+- 作法：每輪 `result <<= 8`，再累加對應的 byte（共 4 次）。
+    
+
+> 現況注意：此函式固定讀 4 bytes；呼叫端需確保輸入指標有效且至少可讀 4 bytes。
+
+#### `unsigned long long CombineByte(void* byte, unsigned int n)`
+
+- 功能：將 `byte` 指向的資料以 **每 4 bytes 一組**，連續組合成一個整數值（以 32-bit chunk 串接），回傳 `unsigned long long`。
+    
+- 作法（就目前實作）：
+    
+    - 迴圈跑 `n` 次
+        
+    - 每次呼叫 `BigEndianToLittleEndian()` 取出 32-bit
+        
+    - 以 `result = (result << 32) | chunk` 的方式串接
+        
+
+> 現況注意：目前的位移/位元組推進是以「每輪把 `byte` 往後位移（i * 4）」的寫法實作；若 `n` 大於 2，指標位移會呈現累積偏移（不是固定每次 +4 的等差前進）。若你未來打算用 `n > 2`，建議回頭檢視此行為是否符合預期。
+
+
+# 6. 簡易記憶體配置 (Simple Allocator)
+
+## `allocator.h`
+
+### 檔案定位
+
+宣告一個**極簡的記憶體配置器（bump allocator）**介面，供專案在**沒有 libc malloc/free** 的情境下，做一次性/向上遞增的記憶體配置。
+
+### 目前提供的功能（宣告）
+
+- `void* SimpleAllocator(unsigned long size);`
+    
+    - 配置 `size` bytes，回傳可用記憶體指標；若配置失敗則回傳 `NULL`。
+
+## `allocator.c`
+
+### 檔案定位
+
+實作 `SimpleAllocator()`：使用 `__bss_end` 作為 heap 起點，透過一個靜態的 `heap_ptr` 持續向上推進，提供「只增不減」的最小可用配置行為。
+
+### 相依性（就現況）
+
+- `../header/allocator.h`
+    
+    - 對外 API 宣告（`SimpleAllocator()`）。
+        
+- `../header/common.h`
+    
+    - 使用 `MMIO_BASE`（做為配置上界判斷）。
+        
+    - 使用 `ALIGN8()`（將配置大小做 8-byte 對齊；以現有程式碼呼叫方式為準）。
+        
+- linker script
+    
+    - 依賴 `__bss_end` 符號（heap 起點由 `__bss_end` 開始）。
+        
+
+### 目前提供的功能（實作）
+
+#### `void* SimpleAllocator(unsigned long size)`
+
+- 初始化（第一次呼叫）：
+    
+    - 若 `heap_ptr == NULL`，將 `heap_ptr = &__bss_end;`，把 `.bss` 結尾當作 heap 起始位置。
+        
+- 配置流程：
+    
+    - `result_ptr = heap_ptr`：本次回傳位置就是目前 heap 頂端。
+        
+    - `size = ALIGN8(size)`：將大小對齊到 8 bytes（避免後續資料結構對齊問題）。
+        
+    - 上界檢查：
+        
+        - 若 `(unsigned long)result_ptr + size > MMIO_BASE`，回傳 `NULL`（避免配置區間越過 MMIO base）。
+            
+    - 成功則推進：
+        
+        - `heap_ptr = (void*)((unsigned long)result_ptr + size);`
+            
+        - 回傳 `result_ptr`。
+            
+
+### 目前的限制/假設（就現況描述）
+
+- **只支援向上遞增配置**：沒有 `free()` / 回收機制，也沒有碎片管理。
+    
+- **上界以 `MMIO_BASE` 作為 guard**：代表可用 heap 空間會受記憶體布局影響；在不同平台或不同 MMIO 映射下，可能過於保守或不適用（此檔案本身不做自動判斷）。
+    
+- **heap 起點假設為 `__bss_end`**：隱含「`.bss` 後方到 `MMIO_BASE` 之間」可作為配置空間；若你的 linker script / stack 配置或其他區段安排不同，需自行確認不會互相覆蓋。
+
+
+# 7. CPIO 檔案系統解析器 (CPIO Parser)
 
 ## `cpio.h`
 
@@ -687,8 +805,278 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `CpioGetFilesHeaderName()` 用於判斷 `TRAILER!!!` 時，傳入的是 `strlen("TRAILER!!!")`（不含 `\0`）
     
 - `CpioGetFileContext()` 搜尋使用者輸入檔名時，傳入 `strlen(file_name) + 1`（含 `\0`）
+
+# 8. Device Tree Blob 解析 (DTB Parser)
+## `dtb.h`
+
+### 檔案定位
+
+提供 Device Tree Blob（DTB / Flattened Device Tree）走訪（traversal）用的**事件列舉**、**callback 介面**與對外 API 宣告，供 kernel/bootloader 端用「callback 驅動」的方式解析 DTB 結構樹。
+
+### 目前提供的功能（宣告）
+
+- **走訪事件列舉 `NodeEnum`**
     
-# 7. 系統計時器 (System Timer)
+    - `ENTER_NODE`：進入一個 node（遇到 `FDT_BEGIN_NODE`）
+        
+    - `LEAVE_NODE`：離開一個 node（遇到 `FDT_END_NODE`）
+        
+    - `PROP_NODE`：讀到一個 property（遇到 `FDT_PROP`）
+        
+- **callback 型別 `FdtHandleNodeFunction`**
+    
+    - 由解析器在走訪期間呼叫，將「目前 node path」、「事件型別」與「property/value」傳回給呼叫端
+        
+    - 參數包含：
+        
+        - `nodeStack` / `depth`：目前所在 node 的堆疊（路徑）與深度
+            
+        - `nodeValueName`：在 `ENTER/LEAVE` 時通常代表 node name；在 `PROP_NODE` 時代表 property name
+            
+        - `valuePtr` / `valueLength`：property value 的原始記憶體位置與長度（僅 `PROP_NODE` 有意義）
+            
+        - `user_data`：由呼叫端傳入、解析器原樣轉交的上下文指標
+            
+- **對外 API**
+    
+    - `bool ReadDTBFile(void* header, FdtHandleNodeFunction callBack, void* user_data);`
+
+## `dtb.c`
+
+### 檔案定位
+
+實作一個**最小化的 DTB 解析器**：從 DTB header 解析出 structure block / strings block 的範圍，逐 token 走訪（`FDT_BEGIN_NODE` / `FDT_PROP` / `FDT_END_NODE` / `FDT_END`），並在走訪過程中以 callback 方式把事件回報給呼叫端。
+
+### 相依性（就現況）
+
+- `../header/dtb.h`
+    
+- `../header/utils.h`（用於 Big-Endian → Little-Endian 的轉換）
+    
+- `../header/string.h`（現況有 include，但本檔案內未見直接呼叫其 API）
+    
+- `common.h`（現況直接 include，並使用 `ALIGN4()` 等共用巨集/型別）
+    
+
+### 目前提供的功能（實作）
+
+#### `bool ReadDTBFile(void* header, FdtHandleNodeFunction callBack, void* user_data)`
+
+- **DTB header 驗證與區塊範圍計算**
+    
+    - 檢查 magic number 是否為 `0xd00dfeed`
+        
+    - 解析並換端序（big-endian → little-endian）取得：
+        
+        - `totalsize`
+            
+        - `off_dt_struct` / `size_dt_struct`
+            
+        - `off_dt_strings` / `size_dt_strings`
+            
+    - 檢查 structure block 與 strings block 是否落在 `header + totalsize` 範圍內（避免越界）
+        
+- **structure block 走訪（token loop）**
+    
+    - 以 `cursor` 逐步掃描 structure block，每次讀一個 token（4 bytes）
+        
+    - 維護：
+        
+        - `nodeStack[MAX_DEPTH]`：儲存目前 node path（指向 DTB blob 內的 node name 字串）
+            
+        - `depth`：目前深度（進入 node 時 `depth++`，離開時 `depth--`）
+            
+- **事件 callback 呼叫時機**
+    
+    - `FDT_BEGIN_NODE`：
+        
+        - 讀取 node name（以 `'\0'` 結尾，並做 4-byte 對齊）
+            
+        - `depth++` 後觸發 `ENTER_NODE`
+            
+    - `FDT_PROP`：
+        
+        - 讀取 `valueLength`、`nameoff`
+            
+        - 從 strings block 取出 property name
+            
+        - `valuePtr` 指向 structure block 內的 value 原始位置
+            
+        - 觸發 `PROP_NODE`
+            
+    - `FDT_END_NODE`：
+        
+        - 觸發 `LEAVE_NODE` 後 `depth--`
+            
+    - `FDT_END`：
+        
+        - 結束解析並回傳 `true`
+            
+    - 遇到未知 token、越界、或結尾未讀到 `FDT_END`：回傳 `false`
+        
+
+> 現況注意：
+> 
+> 1. `ReadDTBFile()` 名稱是 “File”，但現況實作是解析「記憶體中的 DTB blob」，並未包含任何檔案 I/O。
+>     
+> 2. `nodeStack` 與 node/property name 指標皆直接指向 DTB blob 內部；呼叫端若在解析後仍要使用這些字串，需確保 DTB blob 記憶體生命週期仍有效。
+>     
+> 3. `PROP_NODE` 的 `valuePtr/valueLength` 為原始 bytes，不會自動做端序轉換與型別解讀（例如 `reg` 等 property 的語意需由呼叫端自行解析）。
+>     
+> 4. 深度上限固定為 `MAX_DEPTH = 32`；遇到更深的樹會直接視為錯誤回傳 `false`。
+
+# 9. FDT 處理邏輯與上下文 (FDT Handler & Context)
+## `fdtb.h`
+
+### 檔案定位
+
+提供一個「DTB 走訪 callback 的上下文（context）」與數個 callback/工具函式，用來在 `ReadDTBFile()` 走訪 DTB 時**擷取特定節點資訊**（例如 `/chosen` 下的 initrd 範圍），並在走訪過程中**記錄每層 node 的 `#address-cells/#size-cells`** 等解析狀態，供後續裝置/記憶體資訊解讀使用。
+
+### 相依性（就現況）
+
+- `../header/common.h`
+    
+- `../header/string.h`（使用 `string_t` 與字串比對/掃描介面）
+    
+- `../header/dtb.h`（使用 `NodeEnum`、`MAX_DEPTH` 等 DTB traversal 相關定義）
+    
+
+### 目前提供的功能（宣告）
+
+- **資料結構**
+    
+    - `MemRegionT`：以 `(base, size)` 表示一段實體記憶體範圍
+        
+    - `NodeStateT`：保存「當前深度 node」的解析狀態（包含 `matched_driver_id`、`reg_entries[]` 與 `valid_reg_count`）
+        
+    - `CtxT`：DTB 走訪期間的上下文，包含：
+        
+        - initramfs 範圍：`initrd_start/initrd_end` 與對應 `have_*` flags
+            
+        - stdout 目標路徑：`stdout_target_segments[] / stdout_target_depth / have_stdout_target`
+            
+        - UART `reg` 解析結果：`uart_mmio_base / uart_mmio_size / have_uart_reg`
+            
+        - RAM 範圍表：`mem_regions[]`
+            
+        - 逐深度記錄 child cell 設定：`child_addr_cells[] / child_size_cells[]`
+            
+        - 逐深度 node 狀態：`node_state[]`
+            
+- **對外函式（callback/工具）**
+    
+    - `void InitialDtbCtx(CtxT* dtb_ctx);`：初始化/清空 context
+        
+    - `void Initrd_Handler(...)`：走訪到 `/chosen` 時擷取 `linux,initrd-start`/`linux,initrd-end`
+        
+    - `void SaveChildCellAddr(...)`：遇到 `#address-cells` 時保存到 `child_addr_cells[depth-1]`
+        
+    - `void SaveChildCellSize(...)`：遇到 `#size-cells` 時保存到 `child_size_cells[depth-1]`
+        
+    - `a`bool PathEqualsBase(...)`：比對目前走訪路徑是否符合指定 segments（忽略 node name 的 unit-address` @xxxx`）
+        
+    - `unsigned long Decode_Initrd_Addr(...)`：將 initrd property value（4/8 bytes）解讀成位址
+        
+
+> 現況注意：`CtxT` 內宣告的 stdout/UART/RAM 等欄位，是否完整填值取決於對應 callback 是否實作並被註冊；就目前檔案內容來看，已明確實作的重點是 initrd 與 child cells 的保存。
+
+## `fdtb.c`
+
+### 檔案定位
+
+實作 `fdtb.h` 宣告的 DTB 走訪輔助函式與 callback，提供「路徑比對」、「initrd 位址解碼」、「context 初始化」以及「`#address-cells/#size-cells` 保存」等最小可用邏輯，讓呼叫端能在 `ReadDTBFile()` 的 callback 驅動流程中逐步累積解析結果。
+
+### 相依性（就現況）
+
+- `../header/fdtb.h`
+    
+- `../header/utils.h`
+    
+    - 使用 `BigEndianToLittleEndian()` 與 `CombineByte()` 協助端序/位元組組合
+        
+
+### 目前提供的功能（實作）
+
+#### `bool PathEqualsBase(char** nodeStack, int depth, string_t* segments, int compareDepth)`
+
+- 功能：檢查目前 `nodeStack` 的路徑是否等於 `segments` 指定的 base path
+    
+- 行為（就現況）：
+    
+    - 要求 `depth == compareDepth + 1`，否則直接 `false`
+        
+    - 逐段比對 `nodeStack[i+1]`：
+        
+        - 以 `strcspn(name, '@', strlen(name))` 取得 unit-address 前的長度（忽略 `@xxxx`）
+            
+        - 段名長度需等於 `segments[i].size`
+            
+        - 以 `strncmp()` 比對段名內容
+            
+    - 全部吻合則回傳 `true`
+        
+
+#### `unsigned long Decode_Initrd_Addr(unsigned long valuePtr, unsigned int valueLength)`
+
+- 功能：解讀 `linux,initrd-start/end` 的 value bytes 成位址
+    
+- 行為（就現況）：
+    
+    - `valueLength == 4`：用 `CombineByte(..., 1)` 組合 32-bit
+        
+    - `valueLength == 8`：用 `CombineByte(..., 2)` 組合 64-bit
+        
+    - 其他長度回傳 `0`
+        
+
+#### `void InitialDtbCtx(CtxT* dtb_ctx)`
+
+- 功能：將 `CtxT` 內所有欄位清 0 並把 `have_*` flags 設為 `false`
+    
+- 行為包含：
+    
+    - initrd range、stdout path segments、UART reg、mem regions
+        
+    - `child_addr_cells[] / child_size_cells[]`
+        
+    - `node_state[]`（含 `reg_entries[]` 與 `valid_reg_count`）
+        
+
+#### `void SaveChildCellAddr(...)` / `void SaveChildCellSize(...)`
+
+- 功能：保存當前 node 的 `#address-cells` 與 `#size-cells`（供其 child nodes 解讀 `reg` 時使用）
+    
+- 行為（就現況）：
+    
+    - 僅在 `nodeValueName` 分別等於 `"#address-cells"` / `"#size-cells"` 時動作
+        
+    - 將 `valuePtr` 以 `BigEndianToLittleEndian()` 轉換後寫入：
+        
+        - `child_addr_cells[depth - 1]`
+            
+        - `child_size_cells[depth - 1]`
+            
+
+#### `void Initrd_Handler(...)`
+
+- 功能：在 DTB traversal 過程中，擷取 `/chosen` node 下的 initrd 範圍
+    
+- 行為（就現況）：
+    
+    - 僅處理 `event == PROP_NODE`
+        
+    - 透過 `PathEqualsBase(..., ["chosen"], 1)` 限定只在 `/chosen` 生效
+        
+    - 若 property name 為：
+        
+        - `"linux,initrd-start"` → `initrd_start = Decode_Initrd_Addr(...)`，並標記 `have_initrd_start = true`
+            
+        - `"linux,initrd-end"` → `initrd_end = Decode_Initrd_Addr(...)`，並標記 `have_initrd_end = true`
+            
+
+> 現況注意：`Initrd_Handler()` 目前只處理 `/chosen` 的 initrd 兩個 property；`CtxT` 內 stdout/UART/mem_regions 等欄位尚未在本檔案看到對應的填值流程（可能預留給後續擴充 callback）。
+
+# 10. 系統計時器 (System Timer)
 ## `time.h`
 
 ### 檔案定位
@@ -772,7 +1160,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 > 現況注意：此函式本身**不輸出換行**；顯示換行與否由呼叫端決定。另外它將計算結果存入 `int`（整數秒與小數），在長時間運行下是否溢位取決於執行時間與 `int` 寬度，但程式碼現況並未處理溢位或格式化邊界。
 
 
-# 8. 簡易命令列介面 (Shell)
+# 11. 簡易命令列介面 (Shell)
 
 ## `shell.h`
 
@@ -1065,7 +1453,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
     - 輸出 `"Cannot Find File"`
 
-# 9. Mini UART 驅動程式(Mini UART Driver)
+# 12. Mini UART 驅動程式(Mini UART Driver)
 ## `uart.h`
 
 ### 檔案定位
@@ -1259,7 +1647,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 **功能：以 `nop` busy-loop 延遲指定迭代數。**
 
-# 10. 組合語言啟動程式 (Startup)
+# 13. 組合語言啟動程式 (Startup)
 ## `boot.S`
 
 ### 檔案定位
@@ -1367,38 +1755,85 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - 但若發生 relocation，`_relocate_loop_done` 直接 `br x1` 跳回 `_start`，沒有在跳轉前把 `x0` 還原成 DTB；因此重新進 `_start` 時，`x0` 可能不是 DTB，導致 DTB 在 relocation 情境下遺失 :contentReference[oaicite:18]{index=18}
 
 
-# 11. 核心載入器邏輯(Kernel Loader Logic)
+# 14. 核心載入器邏輯 (Kernel Loader Logic)
+
 ## `bootloader_main.c`
 
 ### 檔案定位
 
+<<<<<<< HEAD
 Bootloader 的主流程（以 `kernel_main(void *dtb_addr)` 為入口）：透過 UART 與 host 溝通，接收 kernel size 與 kernel image，將 kernel 寫入 `KERNEL_LOAD_ADDRESS` 後跳轉執行。
+=======
+Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握手並接收 Kernel Image，最後將 `x0` 暫存器中的 DTB 指標傳遞給 Kernel 並跳轉執行。
+>>>>>>> 55a765a (README更改)
 
+### 內容概述
+
+此檔案是 Bootloader image 的 C 語言入口實作：對外提供 `kernel_main(void *dtb)` 以符合 startup/entry 命名，內部則將流程委派到 `bootloader_main()`。整體職責是「與 Host 端透過 UART 完成載入協定 → 將 kernel 寫入固定載入位址 → 轉交控制權給載入後的 kernel」。
+
+- **入口與封裝**
+  - `kernel_main(void *dtb)`：作為 bootloader 的 entry point，僅轉呼叫 `bootloader_main(dtb)`，避免把主流程散落在 entry 函式中。
+- **UART handshake 與載入協定**
+  - 初始化 Mini UART（`uart_init()`），輸出 `OSDI: Ready` 與等待提示字串。
+  - 透過 `uart_recv_uint()` 接收 4 bytes 的 kernel size，並用 `uart_send_hex()` 回送 size（便於 Host/除錯端確認）。
+- **Kernel image 寫入**
+  - 以 `KERNEL_LOAD_ADDRESS` 作為 kernel 目的位址，逐 byte 接收 `size` bytes 並寫入記憶體。
+- **跳轉與 DTB 轉交**
+  - 以 `kernel_entry_t (void (*)(void *))` 型態把 `KERNEL_LOAD_ADDRESS` 視為 kernel entry，並以 `entry(dtb)` 形式跳轉，將 DTB 指標沿用 AArch64 calling convention 傳入（第一參數進 `x0`）。
+  - 以 `__builtin_unreachable()` 表達「正常情況下不應返回」的控制流假設。
 ### 相依性（就現況）
 
-- `../header/common.h`
-  - 使用：`KERNEL_LOAD_ADDRESS`
-- `../header/uart.h`
-  - 使用：`uart_init()`, `uart_puts()`, `uart_recv_uint()`, `uart_send_hex()`, `uart_recv()`
+- `../header/common.h`：使用 `KERNEL_LOAD_ADDRESS`。
+    
+- `../header/uart.h`：使用 UART 相關 I/O 函式。
+    
 
 ### 目前提供的功能（實作）
 
 #### `void kernel_main(void *dtb_addr)`
 
+- 作為 C 語言入口點（由 `boot.S` 呼叫），直接轉呼叫 `bootloader_main(dtb)`。
+    
+- 參數 `dtb` 由啟動組合語言（`boot.S`）透過 `x0` 傳入。
+    
+
+#### `static void bootloader_main(void *dtb)`
+
 1. **初始化 UART**
-   - 呼叫 `uart_init()`，確保 bootloader 能與 host 端通訊。
+    
+    - 呼叫 `uart_init()`，確保 Bootloader 能與 Host 端通訊。
+        
+2. **握手與接收 Size**
+    
+    - 輸出 `OSDI: Ready` 與提示訊息。
+        
+    - 透過 `uart_recv_uint()` 接收 Kernel Size，並回傳 Hex 確認。
+        
+3. **接收 Kernel Image**
+    
+    - 將接收到的 bytes 逐一寫入 `KERNEL_LOAD_ADDRESS`（0x80000）。
+        
+4. **傳遞 DTB 並跳轉 (Handoff)**
+    
+    - 定義函式指標型別：`typedef void (*kernel_entry_t)(void *);`。
+        
+    - 強制轉型：`kernel_entry_t entry = (kernel_entry_t)KERNEL_LOAD_ADDRESS;`。
+        
+    - **執行跳轉**：`entry(dtb);`。
+        
+        - 這會依循 ARM64 Calling Convention，將 `dtb` 指標放入 `x0` 暫存器，並跳轉至 Kernel 入口。
+            
+5. **不可達區域**
+    
+    - 使用 `__builtin_unreachable()` 提示編譯器此處不應返回。
+        
 
-2. **握手/提示輸出**
-   - 輸出：`"\r\nOSDI: Ready\r\n"`
-   - 輸出：`"Bootloader: Waiting for Kernel size..."`
+> **現況注意**： 相比於舊版，此版本已修正 Handoff 流程，現在 Bootloader 會明確地將 `dtb` 指標傳遞給載入後的 Kernel。
 
-3. **接收 kernel size（4 bytes）**
-   - `unsigned int size = uart_recv_uint();`
-   - `uart_send_hex(size);`（以 hex 回送 size）
 
-4. **提示開始接收 kernel**
-   - 輸出：`"Bootloader: Waiting for Loding Kernel..."`
+# 15. 作業系統核心主程式 (Kernel Main)
 
+<<<<<<< HEAD
 5. **接收 kernel image 並寫入固定載入位址**
    - `char* kernel_code = (char*)KERNEL_LOAD_ADDRESS;`
    - 迴圈 `i = 0..size-1`：
@@ -1417,49 +1852,93 @@ Bootloader 的主流程（以 `kernel_main(void *dtb_addr)` 為入口）：透�
   2. 緊接著送出 `size` bytes 的 kernel image
 - 此流程沒有檔案完整性檢查（checksum）、timeout、或錯誤復原；現況是「收到多少寫多少，寫完就跳」。
 # 12. 作業系統核心主程式(Kernel Main)
+=======
+>>>>>>> 55a765a (README更改)
 ## `kernel_main.c`
 
 ### 檔案定位
 
-Kernel 入口：初始化 UART、輸出歡迎訊息，並進入 shell 互動主程式。
+Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲取硬體與 Initramfs 資訊），初始化周邊，並進入互動式 Shell。
 
+### 內容概述
+
+此檔案是 Kernel image 的主入口（`kernel_main(void *dtb_addr)`）：開機後先以 DTB 指標建立/解析裝置樹上下文（供後續 initrd / 硬體資訊使用），再初始化 UART 並進入 shell 互動迴圈。
+
+- **DTB 解析與上下文初始化**
+  - 使用全域 `dtb_ctx` 作為 DTB 解析與狀態保存的 context。
+  - `InitialDtbCtx(&dtb_ctx)`：初始化 context。
+  - `ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx)`：解析 DTB blob，並透過 callback（`Initrd_Handler`）處理 DTB 內與 initrd 相關的節點/資訊（實際行為取決於 dtb/fdtb 模組實作）。
+  - 若解析失敗，目前分支為空（尚未做錯誤輸出/復原）。
+- **UART 與互動主迴圈**
+  - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
+  - 輸出 `Welcome to OSDI`。
+  - 呼叫 `shell_main()` 進入互動模式，接收使用者輸入並輸出結果。
 ### 相依性（就現況）
 
-- `../header/uart.h`（你先前那版）
+- `../header/uart.h`：UART 初始化與輸出。
     
-    - 使用：`uart_init()`, `uart_puts()`
-        
-- `../header/shell.h`
+- `../header/shell.h`：Shell 主迴圈。
     
-    - 使用：`shell_main()`
-        
+- `../header/dtb.h`：`ReadDTBFile` 解析函式。
+    
+- `../header/fdtb.h`：`CtxT` 結構與 `Initrd_Handler` 邏輯。
+    
 
 ### 目前提供的功能（實作）
 
+<<<<<<< HEAD
 #### `void kernel_main(void* dtb_addr)`
 > `dtb_addr` 由啟動程式 `boot.S`（以及 Bootloader 的 jump）透過 `x0` 轉交進來。
+=======
+#### 全域變數
+>>>>>>> 55a765a (README更改)
 
-1. **重新初始化 UART**
+- `CtxT dtb_ctx;`：用於儲存 DTB 解析後的上下文資訊（如 initramfs 範圍）。
     
-    - 註解表達「硬體已經開了，但為了保險重新設定一次」。
-        
-    - 呼叫 `uart_init()`。
-        
-2. **輸出歡迎訊息**
+
+#### `void kernel_main(void* dtb_addr)`
+
+1. **接收 DTB**
     
-    - `uart_puts("\r\nWelcome to OSDI\r\n");`
+    - 函式參數 `dtb_addr` 對應到 `x0` 暫存器（由 Bootloader 傳入）。
         
-3. **進入 shell**
+2. **解析 Device Tree**
     
-    - 呼叫 `shell_main()` 以獲取使用者輸入並處理指令。
+    - 呼叫 `InitialDtbCtx(&dtb_ctx)` 初始化上下文。
+        
+    - 呼叫 `ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx)`：
+        
+        - 遍歷 DTB 結構。
+            
+        - 透過 `Initrd_Handler` 抓取 `/chosen` 節點下的 `linux,initrd-start` 與 `end`。
+            
+        - 解析結果存於全域變數 `dtb_ctx` 中。
+            
+3. **重新初始化 UART**
+    
+    - 呼叫 `uart_init()` 確保硬體狀態（雖然 Bootloader 已開過，但重設以保險）。
+        
+4. **進入 Shell**
+    
+    - 印出 `Welcome to OSDI`。
+        
+    - 呼叫 `shell_main()` 進入互動模式。
         
 
-### 目前的限制/假設（就現況描述）
+> **現況注意**：
+> 
+> 1. 程式碼中保留了 `volatile int lock = 1; while(lock);` 的除錯鎖（目前被註解掉），若需 GDB attach 除錯 startup 流程時可啟用。
+>     
+> 2. 此階段已能透過 `dtb_ctx` 取得 Initramfs 的記憶體位置，但尚未將其掛載到檔案系統層，Shell 目前仍使用 header 定義的 `FILE_HEADER` 或是需修改 Shell 邏輯來使用 `dtb_ctx` 的值。
 
-- `kernel_main()` 目前只做 UART + shell，未在此檔案內進行其他子系統初始化（例如中斷、記憶體管理、例外向量表設定等）。
 
+<<<<<<< HEAD
 # 13. Python 傳輸腳本 (Python Serial Script)
 ## `Python/send_kernel.py`
+=======
+# 16. Python 傳輸腳本 (Python Serial Script)
+## `send_kernel.py`
+>>>>>>> 55a765a (README更改)
 
 ### 檔案定位
 
@@ -1650,7 +2129,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 - `retry_count / max_retries` 目前僅宣告，未被使用；現況不會在等待階段做重試次數上限控制。
     
 - 互動模式以「行」讀 stdin（`readline()`），因此送到裝置端的輸入以「每行」為單位。
-# 14. 自動化編譯與建置設定(Build Automation)
+# 17. 自動化編譯與建置設定(Build Automation)
 ## `Makefile`
 
 ### 檔案定位
@@ -1801,7 +2280,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     
 - `-initrd initramfs.cpio` 固定使用該檔名；現況未提供自動生成/打包 initramfs 的目標（純使用既有檔案）。
 
-# 15. 連結腳本 (Linker Scripts)
+# 18. 連結腳本 (Linker Scripts)
 ## `linker_boot.ld`
 
 ### 檔案定位
@@ -1885,7 +2364,7 @@ Kernel 的 linker script：定義 kernel 的 link address、section 佈局、`.b
 
 - 同 `linker_boot.ld`：主要支援 early boot、BSS、stack，未額外規劃 heap/更細緻的記憶體映射。
 
-# 16. VSCode設定 (VS Code Configuration)
+# 19. VSCode設定 (VS Code Configuration)
 
 ## launch.json
 
@@ -2055,4 +2534,8 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
 - `cStandard/cppStandard` 目前使用 `${default}`；`compilerArgs` 目前等同無額外參數（只有空字串）。
 ### 目前的限制/假設（就現況描述）
 
+<<<<<<< HEAD
 - 此組態的 `intelliSenseMode` 為 `linux-gcc-x64`，且 `compilerPath` 指向 `/usr/bin/gcc`；若你的實際 target 為 AArch64/bare-metal，IntelliSense 的內建巨集/型別模型可能與真實編譯環境不完全一致（這是目前檔案內容所呈現的狀態）。
+=======
+- 此組態的 `intelliSenseMode` 為 `linux-gcc-x64`，且 `compilerPath` 指向 `/usr/bin/gcc`；若你的實際 target 為 AArch64/bare-metal，IntelliSense 的內建巨集/型別模型可能與真實編譯環境不完全一致（這是目前檔案內容所呈現的狀態）。
+>>>>>>> 55a765a (README更改)
