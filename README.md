@@ -1458,7 +1458,7 @@ Kernel 入口：初始化 UART、輸出歡迎訊息，並進入 shell 互動主�
 - `kernel_main()` 目前只做 UART + shell，未在此檔案內進行其他子系統初始化（例如中斷、記憶體管理、例外向量表設定等）。
 
 # 13. Python 傳輸腳本 (Python Serial Script)
-## `send_kernel.py`
+## `Python/send_kernel.py`
 
 ### 檔案定位
 
