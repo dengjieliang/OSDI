@@ -862,7 +862,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
 - `time.h`：`get_timetick()`
     
-- `cpio.h`：`FILE_HEADER`, `CpioGetFilesHeaderName()`, `CpioGetFileContext()`
+- `cpio.h`：DTB context 的 `initrd_start`, `CpioGetFilesHeaderName()`, `CpioGetFileContext()`
     
 - `common.h`：`MAX_ARGS`, `bool/true/false`
     
@@ -887,9 +887,9 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
 - `cancel`：取消 reset（`cancel_reset()`）並解除 reboot lock
     
-- `ls`：列出 initramfs 內檔名（以 `FILE_HEADER` 為起點）
+- `ls`：列出 initramfs 內檔名（以 DTB context 的 `initrd_start` 為起點）
     
-- `cat`：輸出指定檔案內容（以 `FILE_HEADER` 為起點）
+- `cat`：輸出指定檔案內容（以 DTB context 的 `initrd_start`為起點）
     
 - 尾端 sentinel：`{NULL, NULL}`
     
