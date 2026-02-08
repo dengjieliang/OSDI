@@ -321,15 +321,32 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-宣告專案自製的字串函式介面（避免依賴 libc）。
+宣告專案自製的字串/字元掃描介面（避免依賴 libc），並提供一個輕量的字串描述型別 `string_t`。
 
 ### 目前提供的功能（宣告）
 
-- `int strcmp(const char *s1, const char *s2);`
+- 型別：
     
-- `int strncmp(const char *s1, const char *s2, unsigned long read_byte);`
+    - `typedef struct string { char* string_ptr; unsigned int size; } string_t;`
+        
+        - 用 `(ptr, size)` 方式攜帶字串緩衝區位置與長度資訊（是否使用取決於呼叫端）。
+            
+- 字串比較：
     
-- `unsigned long strlen(const char *s);`
+    - `int strcmp(const char *s1, const char *s2);`
+        
+    - `int strncmp(const char *s1, const char *s2, unsigned long read_byte);`
+        
+- 字元掃描（bounded）：
+    
+    - `unsigned int strcspn(const char *s, const char reject, int max_len);`
+        
+- 長度計算（bounded）：
+    
+    - `unsigned long strlen(const char *s);`
+        
+
+> 現況注意：`strcspn()` 的介面與標準 libc 的 `strcspn(const char*, const char*)` 不同；此專案版本只支援「單一 reject 字元」並額外提供 `max_len` 上限。
     
 
 ---
@@ -338,7 +355,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-實作 `string.h` 宣告的字串函式，並使用 `common.h` 的 `MAX_STRING_SIZE` 作為 `strlen` 的掃描上限。
+實作 `string.h` 宣告的字串函式；其中 `strlen()` 會使用 `common.h` 內的 `MAX_STRING_SIZE` 作為掃描上限，避免在缺少 `'\0'` 的情況下無限掃描。
 
 ### 目前提供的功能（實作）
 
@@ -350,26 +367,46 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
         
     - 發現不同字元
         
-- 回傳：`*(unsigned char *)s1 - *(unsigned char *)s2`  
-    （用 `unsigned char` 避免符號位造成的差值異常）
+- 回傳：`*(unsigned char *)s1 - *(unsigned char *)s2`
     
+    - 使用 `unsigned char` 做差，避免符號位造成差值異常。
+        
 
 #### `strncmp(const char *s1, const char *s2, unsigned long read_byte)`
 
-- 最多比較 `read_byte` 次：
+- 若 `read_byte == 0`：直接回傳 `0`
+    
+- 否則最多比較 `read_byte` 次：
     
     - 若遇到不同字元 → 跳出迴圈
         
-    - 若遇到 `'\0'` → 立即回傳 `0`
+    - 若遇到 `'\0'`（以 `s1_tmp` 判斷）→ 立即回傳 `0`
         
 - 迴圈結束後回傳：`(unsigned char)s1_tmp - (unsigned char)s2_tmp`
     
 
-> 現況注意：當 `read_byte == 0` 時，for-loop 不會執行，`s1_tmp/s2_tmp` 未被初始化就被拿來回傳差值，行為在 C 語言層面屬未定義（這是「目前程式碼實際狀態」）。
+> 現況注意：此實作**已**在 `read_byte == 0` 時提前回傳 `0`，因此不會出現「未初始化的 s1_tmp/s2_tmp 被拿來回傳」的未定義行為（這點與你 README 內目前寫的現況注意不同，建議以此段更新）。
+
+#### `strcspn(const char *s, const char reject, int max_len)`
+
+- 目的：在 **最多 `max_len`** 的範圍內，尋找字串中第一個：
+    
+    - `'\0'`，或
+        
+    - 等於 `reject` 的字元
+        
+- 回傳：
+    
+    - 找到上述條件時回傳其 index
+        
+    - 若掃描滿 `max_len` 仍未命中，回傳 `max_len`
+        
+
+> 現況注意：此版本是「單一 reject 字元」的 bounded 掃描器；若需要 reject-set（多個字元集合）語意，需要呼叫端自行擴充或另寫函式。
 
 #### `strlen(const char *s)`
 
-- 目的：計算字串長度，但**最多掃描到 `MAX_STRING_SIZE`（1024）**。
+- 目的：計算字串長度，但**最多掃描到 `MAX_STRING_SIZE`**（上限由 `common.h` 提供）。
     
 - 行為流程（就目前實作）：
     
@@ -382,6 +419,9 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     4. 若偵測到可能含 `'\0'`，回到 byte 模式逐字確認並回傳
         
     5. 若掃描到 `MAX_STRING_SIZE` 仍未遇到 `'\0'`，回傳當前累積的 `length`（最大不超過 `MAX_STRING_SIZE`）
+        
+
+> 現況注意：此 `strlen()` 的 word-scan 假設 `unsigned long` 為 64-bit（AArch64 環境成立）；且若輸入緩衝區在 `MAX_STRING_SIZE` 範圍內沒有 `'\0'`，回傳值會被「上限截斷」。
 # 5. 通用工具 (Utilities)
 
 ## `utils.h`
