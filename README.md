@@ -740,6 +740,16 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 定義簡易 shell 的命令資料結構（command table）與對外 API。
 
+### 內容概述
+
+此檔案定義簡易 shell 的命令表資料結構與對外介面：
+
+- 命令 handler 介面：`CommandFunc(int argc, char* argv[])`
+- 命令表元素：`Command_t { name, description, func }`
+- 對外 API：
+  - `shell_main()`：shell 主迴圈入口
+  - `shell_input_line()`：顯示 prompt、讀入一行並回傳 buffer
+  - `execute_command(argc, argv)`：依命令表比對並執行對應 handler
 ### 目前提供的功能
 
 - 命令函式型別：
@@ -774,6 +784,32 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - 依命令表執行對應指令（hello/help/info/time/reboot/cancel/ls/cat）
     
 
+### 內容概述
+
+此檔案實作互動式 shell（blocking UART I/O），核心流程為：
+
+1. 顯示開機訊息後進入無限迴圈（`shell_main()`）
+2. 每輪先印出 prompt：`[` + `get_timetick()` + `]` + `:shell$ `
+3. 讀入一行輸入（支援 Enter / Backspace，存入固定長度 `input_buffer[128]`）
+4. 以空白做就地切割（in-place tokenize）產生 `argc/argv`
+5. 在命令表 `commands[]` 中做字串比對，找到就呼叫對應 handler，否則輸出 `Command not found: ...`
+
+內建命令（就現況 `commands[]`）：
+
+- `hello`：輸出 Hello World
+- `help`：列出所有命令與描述
+- `info`：透過 mailbox 輸出 board revision 與 memory size（hex）
+- `time`：輸出目前 timetick
+- `reboot`：設定 watchdog reset（並開啟 reboot lock）
+- `cancel`：取消 reset（並解除 reboot lock）
+- `ls`：列出 initramfs 內檔名（header 來源為 DTB context 的 `initrd_start`）
+- `cat`：輸出指定檔案內容（header 來源同上）
+
+現況注意（以程式碼行為為準）：
+
+- `shell_main()` 呼叫 `shell_input_line()` 時不使用回傳值，但因為 tokenization 是直接處理全域 `input_buffer`，所以流程仍成立。
+- `input_buffer` 固定 128 bytes：滿了之後仍會回顯輸入，但不再寫入 buffer。
+- reboot lock 檢查使用字串 `"Cancel Reboot"`，但實際解除命令名稱是 `cancel`；在 lock 開啟後，依目前邏輯可能導致無法透過既有命令解除（此為現有行為描述）。
 ### 相依性（就現況）
 
 - `uart.h`：`uart_puts/uart_send/uart_recv/uart_send_hex` 等
@@ -968,7 +1004,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 #### `cmd_get_file_header`（`ls`）
 
-- `header = (void*)FILE_HEADER`
+- `header = 由 DTB 解析得到的 initrd_start
     
 - `file_count = CpioGetFilesHeaderName(header)`
     
@@ -983,7 +1019,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
         
     - `argc != 2`：輸出 `"False Argument"` 並 return
         
-- `header = (void*)FILE_HEADER`
+- `header = 由 DTB 解析得到的 initrd_start
     
 - `CpioGetFileContext(header, argv[1])` 若回傳 `false`：
     
