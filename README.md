@@ -28,7 +28,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - relocate：將程式碼從載入位址搬移至 Linker 設定位址（Bootloader 為 0x60000）。
   - clear bss：清空 BSS，確保全域變數初始值為 0。
   - set sp：設定 Stack Pointer。
-- handoff：跳轉至 C 語言入口（統一為 `kernel_main`；Bootloader build 會在 `kernel_main` 內再轉呼叫 `bootloader_main`）。
+- handoff：跳轉至 C 語言入口（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader build 的 `kernel_main` 即 Bootloader 主流程）。
 - `CFile/bootloader_main.c`：
   - UART init：初始化 Mini UART。
   - handshake：送出 `OSDI: Ready` 通知 Host 端可以開始傳輸。
@@ -55,7 +55,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 - `Python/send_kernel.py`：
   - connection：以 socket 連線到 QEMU Serial Port（127.0.0.1:8888）。
-  - loader protocol：等待 `OSDI: Ready` → 傳送 Kernel Size（Little Endian）→ 傳送 `kernel8.img` 檔案內容。
+  - loader protocol：等待 `OSDI: Ready` → 傳送 Kernel Size（Little Endian）→ 傳送 `build/kernel8.img` 檔案內容。
   - terminal emulator：使用 select 做非阻塞 I/O，同時監聽 socket（目標輸出）與 stdin（使用者輸入），並處理 UTF-8 decode。
 # 1. 共同定義 (Common Definitions)
 
@@ -1270,7 +1270,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - relocation：必要時將程式搬移到 linker 指定位址
 - 初始化 Stack Pointer（`sp`）
 - 清空 `.bss`
-- 跳轉到 C 語言入口 `kernel_main(...)`（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader 內部主流程在 `bootloader_main`）。
+- 跳轉到 C 語言入口 `kernel_main(void *dtb_addr)`（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader build 會保留 `dtb_addr`，並在跳轉到實際載入的 Kernel 時一併轉交）。
 - 進入 idle loop 避免返回
 
 ### 內容概述
@@ -1372,7 +1372,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-Bootloader 的主流程（以 `kernel_main(void *dtb)` 為入口）：透過 UART 與 host 溝通，接收 kernel size 與 kernel image，將 kernel 寫入 `KERNEL_LOAD_ADDRESS` 後跳轉執行。
+Bootloader 的主流程（以 `kernel_main(void *dtb_addr)` 為入口）：透過 UART 與 host 溝通，接收 kernel size 與 kernel image，將 kernel 寫入 `KERNEL_LOAD_ADDRESS` 後跳轉執行。
 
 ### 相依性（就現況）
 
@@ -1383,7 +1383,7 @@ Bootloader 的主流程（以 `kernel_main(void *dtb)` 為入口）：透過 UAR
 
 ### 目前提供的功能（實作）
 
-#### `void kernel_main(void *dtb)`
+#### `void kernel_main(void *dtb_addr)`
 
 1. **初始化 UART**
    - 呼叫 `uart_init()`，確保 bootloader 能與 host 端通訊。
@@ -1407,8 +1407,8 @@ Bootloader 的主流程（以 `kernel_main(void *dtb)` 為入口）：透過 UAR
 
 6. **跳轉到 kernel entry**
    - 目前用：
-     - `((void (*)(void))KERNEL_LOAD_ADDRESS)();`
-   - 意味著「以無參數函式」的型態呼叫 kernel entry。
+     - `((void (*)(void))KERNEL_LOAD_ADDRESS)(dtb_addr);`
+   - 意味著「跳入 kernel entry 時，`x0` 仍帶著 DTB 位址」。
 
 ### 目前的限制/假設（就現況描述）
 
@@ -1437,6 +1437,7 @@ Kernel 入口：初始化 UART、輸出歡迎訊息，並進入 shell 互動主�
 ### 目前提供的功能（實作）
 
 #### `void kernel_main(void* dtb_addr)`
+> `dtb_addr` 由啟動程式 `boot.S`（以及 Bootloader 的 jump）透過 `x0` 轉交進來。
 
 1. **重新初始化 UART**
     
@@ -1463,7 +1464,7 @@ Kernel 入口：初始化 UART、輸出歡迎訊息，並進入 shell 互動主�
 ### 檔案定位
 
 Host 端的 **Kernel Loader + 簡易終端機**工具：  
-透過 `socket://127.0.0.1:8888` 連到 QEMU 的 serial server，等待 Bootloader 輸出就緒字串後，依協定送出 `kernel8.img` 的大小與內容，最後進入互動模式，將使用者輸入轉送到裝置端並顯示裝置端輸出。
+透過 `socket://127.0.0.1:8888` 連到 QEMU 的 serial server，等待 Bootloader 輸出就緒字串後，依協定送出 `build/kernel8.img` 的大小與內容，最後進入互動模式，將使用者輸入轉送到裝置端並顯示裝置端輸出。
 
 ---
 
@@ -1486,9 +1487,8 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 - 外部環境假設（就現況）
     
     - QEMU serial server：`127.0.0.1:8888`
-        
     - Kernel image 路徑固定：`build/kernel8.img`
-        
+
 
 ---
 
