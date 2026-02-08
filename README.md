@@ -6,21 +6,21 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 ## 0.1 目前可做什麼（Overview / What you can do now）
 
 - 目前可在 QEMU 上啟動 Bootloader，Bootloader 會先透過 UART 對 Host 輸出 `OSDI: Ready`，表示已就緒並等待載入 Kernel。
-- Host 端執行 `Python/send_kernel.py` 連線到 QEMU Serial Port（127.0.0.1:8888），並依協定送出 Kernel Size（Little Endian）與 `kernel8.img` 內容。
+- Host 端執行 `Python/send_kernel.py` 連線到 QEMU Serial Port（127.0.0.1:8888），並依協定送出 Kernel Size（Little Endian）與 `build/kernel8.img` 內容。
 - Bootloader 會把 Kernel 寫入 `KERNEL_LOAD_ADDRESS (0x80000)`，再以 Function Pointer 方式跳轉到 Kernel Entry Point。
 - Kernel 啟動後會再次初始化 UART，印出 `Welcome to OSDI`，接著呼叫 `shell_main()` 進入互動模式。
-- 整體資料流為：使用make qemu-gdb 編譯檔案 → Host（send_kernel.py） → Bootloader（UART handshake + load） → Kernel（print + init） → Shell（互動輸入輸出）。
+- 整體資料流為：先使用 `make all` 完成建置（產出 `build/bootloader.img` / `build/kernel8.img`）→ 再以 `make qemu-gdb` 啟動 QEMU（GDB Server :1234 + Serial Server :8888）→ Host（send_kernel.py） → Bootloader（UART handshake + load） → Kernel（print + init） → Shell（互動輸入輸出）。
 
 ## 0.2 建置與執行流程（Build & Run Pipeline）
 
-- Makefile：設定 aarch64-linux-gnu- 交叉編譯工具鏈，並將 Bootloader / Kernel 分開編譯成兩個 Image（bootloader.img、kernel8.img）。
+- Makefile：設定 aarch64-linux-gnu- 交叉編譯工具鏈，並將 Bootloader / Kernel 分開建置成兩個 Image（`build/bootloader.img`、`build/kernel8.img`）。
 - Makefile Targets：提供 `make qemu` 啟動 QEMU 模擬；`make qemu-gdb` 啟動 QEMU 並開啟 GDB Server（:1234）與 Serial Server（:8888）。
 - Linker Scripts：
   - `linker_boot.ld`：設定 Bootloader Entry Point 為 0x60000，並定義 BSS 與 Stack Top。
   - `linker_kernel.ld`：設定 Kernel Entry Point 為 0x80000，並定義 BSS 與 Stack Top。
 - VS Code：
   - `tasks.json`：自動化 `make all` 與啟動 `make qemu-gdb`（並加上 pkill 避免舊 QEMU 佔用 Port）。
-  - `launch.json`：設定 GDB 連線至 :1234，並載入 `bootloader.elf` 符號表以便除錯。
+  - `launch.json`：設定 GDB 連線至 :1234，並載入 `build/bootloader.elf` 符號表以便除錯。
 
 ## 0.3 開機交棒流程（Boot Chain）
 
@@ -1661,11 +1661,11 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     
 - 產出兩個映像：
     
-    - `bootloader.img`（由 `bootloader_main.c` 連結而成）
+    - `build/bootloader.img`（由 `bootloader_main.c` 連結而成）
         
-    - `kernel8.img`（由 `kernel_main.c` 連結而成）
+    - `build/kernel8.img`（由 `kernel_main.c` 連結而成）
         
-- QEMU 以 `-kernel bootloader.img` 啟動，並以 `-initrd initramfs.cpio` 提供 initramfs
+- QEMU 以 `-kernel $(IMG_BOOT)`（現況為 `build/bootloader.img`）啟動，並以 `-initrd initramfs.cpio` 提供 initramfs
     
 
 ### 目前提供的功能（內容）
@@ -1750,15 +1750,15 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 
 - Bootloader：
     
-    - `ld -T linker_boot.ld -o bootloader.elf $(OBJS_FOR_BOOTLOADER)`
-        
-    - `objcopy -O binary bootloader.elf bootloader.img`
+    - `ld -T linker_boot.ld -o build/bootloader.elf $(OBJS_FOR_BOOTLOADER)`
+    
+	- `objcopy -O binary build/bootloader.elf build/bootloader.img`
         
 - Kernel：
     
-    - `ld -T linker_kernel.ld -o kernel8.elf $(OBJS_FOR_KERNEL)`
-        
-    - `objcopy -O binary kernel8.elf kernel8.img`
+    - `ld -T linker_kernel.ld -o build/kernel8.elf $(OBJS_FOR_KERNEL)`
+    
+	- `objcopy -O binary build/kernel8.elf build/kernel8.img`
         
 
 #### 6) 編譯規則
@@ -1772,7 +1772,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 
 #### 7) QEMU 執行目標
 
-- `qemu`：以 raspi3b 機器啟動，kernel 指向 `bootloader.img`，並掛載 initramfs 與 serial tcp：
+- `qemu`：以 raspi3b 機器啟動，kernel 指向 `$(IMG_BOOT)`（`build/bootloader.img`），並掛載 initramfs 與 serial tcp：
     
     - `-machine raspi3b`
         
@@ -1797,7 +1797,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     
     - `CFile/`, `Assembly/`, `header/`
         
-- QEMU 的 `-kernel` 只載入 `bootloader.img`；`kernel8.img` 的存在主要供 host 工具透過 UART 傳送，或供你在其他流程使用（Makefile 本身僅負責把它建出來）。
+- QEMU 的 `-kernel` 只載入 `$(IMG_BOOT)`（`build/bootloader.img`）；`build/kernel8.img` 的存在主要供 host 工具透過 UART 傳送，或供你在其他流程使用（Makefile 本身僅負責把它建出來）。
     
 - `-initrd initramfs.cpio` 固定使用該檔名；現況未提供自動生成/打包 initramfs 的目標（純使用既有檔案）。
 
