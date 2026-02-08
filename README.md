@@ -28,7 +28,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - relocate：將程式碼從載入位址搬移至 Linker 設定位址（Bootloader 為 0x60000）。
   - clear bss：清空 BSS，確保全域變數初始值為 0。
   - set sp：設定 Stack Pointer。
-  - handoff：跳轉至 C 語言入口（kernel_main 或 bootloader_main）。
+- handoff：跳轉至 C 語言入口（統一為 `kernel_main`；Bootloader build 會在 `kernel_main` 內再轉呼叫 `bootloader_main`）。
 - `CFile/bootloader_main.c`：
   - UART init：初始化 Mini UART。
   - handshake：送出 `OSDI: Ready` 通知 Host 端可以開始傳輸。
@@ -1270,7 +1270,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - relocation：必要時將程式搬移到 linker 指定位址
 - 初始化 Stack Pointer（`sp`）
 - 清空 `.bss`
-- 跳轉到 C 語言入口 `kernel_main(...)`
+- 跳轉到 C 語言入口 `kernel_main(...)`（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader 內部主流程在 `bootloader_main`）。
 - 進入 idle loop 避免返回
 
 ### 內容概述
@@ -1416,10 +1416,6 @@ Bootloader 的主流程（以 `kernel_main(void *dtb)` 為入口）：透過 UAR
   1. `uart_recv_uint()` 可解析的 4 bytes size（依 `uart_recv_uint()` 的實作行為）
   2. 緊接著送出 `size` bytes 的 kernel image
 - 此流程沒有檔案完整性檢查（checksum）、timeout、或錯誤復原；現況是「收到多少寫多少，寫完就跳」。
-- **DTB handoff（傳給載入後的 kernel）目前尚未完成：**
-  - `kernel_main` 雖然宣告了 `void *dtb` 參數（對應 startup code 會嘗試把 DTB 放在 `x0` 傳入），但目前 bootloader 內部沒有使用它。
-  - 跳轉 kernel 時使用 `void (*)(void)` 呼叫，代表編譯器不會幫你把 `dtb` 放進 `x0`；因此「載入後的 kernel」目前拿不到 DTB（除非 kernel 自己用其他方式取得）。
-  - 若要讓載入後的 kernel 收到 DTB，呼叫型態需改成「帶一個參數」的 function pointer（使編譯器依 AArch64 calling convention 將第一參數放入 `x0`），或在跳轉前用 inline asm 強制設定 `x0`。
 # 12. 作業系統核心主程式(Kernel Main)
 ## `kernel_main.c`
 
@@ -1440,7 +1436,7 @@ Kernel 入口：初始化 UART、輸出歡迎訊息，並進入 shell 互動主�
 
 ### 目前提供的功能（實作）
 
-#### `void kernel_main(void)`
+#### `void kernel_main(void* dtb_addr)`
 
 1. **重新初始化 UART**
     
