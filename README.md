@@ -915,7 +915,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 - prompt 輸出格式（依現況輸出順序）：
     
-    - `[` + `get_timetick()` + `]` + `:shell$`
+    - `[` + `get_timetick()` + `]` + `:shell$ `
         
 - 輸入處理（blocking）：
     
