@@ -1229,7 +1229,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `info`：透過 mailbox 輸出 board revision 與 memory size（hex）
 - `time`：輸出目前 timetick
 - `reboot`：設定 watchdog reset（並開啟 reboot lock）
-- `cancel`：取消 reset（並解除 reboot lock）
+- `cancelReboot`：取消 reset（並解除 reboot lock）
 - `ls`：列出 initramfs 內檔名（header 來源為 DTB context 的 `initrd_start`）
 - `cat`：輸出指定檔案內容（header 來源同上）
 
@@ -1237,7 +1237,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 - `shell_main()` 呼叫 `shell_input_line()` 時不使用回傳值，但因為 tokenization 是直接處理全域 `input_buffer`，所以流程仍成立。
 - `input_buffer` 固定 128 bytes：滿了之後仍會回顯輸入，但不再寫入 buffer。
-- reboot lock 檢查使用字串 `"Cancel Reboot"`，但實際解除命令名稱是 `cancel`；在 lock 開啟後，依目前邏輯可能導致無法透過既有命令解除（此為現有行為描述）。
+- `reboot` 與 `cancelReboot` 命令的鎖定機制已經同步，`cancelReboot` 命令可以正常解除由 `reboot` 命令啟用的鎖。
 ### 相依性（就現況）
 
 - `uart.h`：`uart_puts/uart_send/uart_recv/uart_send_hex` 等
@@ -1273,7 +1273,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
 - `reboot`：設定 watchdog reset（`reset(150000)`）並進入 reboot lock
     
-- `cancel`：取消 reset（`cancel_reset()`）並解除 reboot lock
+- `cancelReboot`：取消 reset（`cancel_reset()`）並解除 reboot lock（對應命令表中的 `"cancelReboot"`）
     
 - `ls`：列出 initramfs 內檔名（以 DTB context 的 `initrd_start` 為起點）
     
@@ -1355,7 +1355,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 - reboot lock（`static bool reboot_lock`）行為（依現況）：
     
-    - 在迴圈中，若 `reboot_lock == true` 且 `strcmp("Cancel Reboot", argv[0]) != 0`：
+    - 在迴圈中，若 `reboot_lock == true` 且 `strcmp("cancelReboot", argv[0]) != 0`：
         
         - 輸出 `"Rebooting... Please input 'Cancel Reboot' to abort."`
             
@@ -1372,7 +1372,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
             - `"\nCommand not found:" + argv[0] + "\n"`
                 
 
-> 現況注意：命令表中解除重啟的命令名稱是 `cancel`，但 lock 檢查字串是 `"Cancel Reboot"`；因此在 `reboot_lock` 開啟後，依目前程式碼邏輯可能導致「既有命令無法通過 lock 檢查」的狀況（此為現有行為描述，不推測設計意圖）。
+> 現況注意：`reboot` 命令的鎖定/解鎖機制 (`reboot_lock`) 已與 `cancelReboot` 命令同步。當 `reboot_lock` 為 `true` 時，只有 `cancelReboot` 命令可以被執行以解除鎖定，確保了操作的一致性。
 
 ---
 
@@ -1423,11 +1423,13 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - 設定 `reboot_lock = true`
     
 
-#### `cmd_cancel_reboot`（`cancel`）
+#### `cmd_cancel_reboot`（`cancelReboot`）
 
 - 呼叫 `cancel_reset()`
     
 - 設定 `reboot_lock = false`
+
+> 現況注意：命令名稱為 `"cancelReboot"` （驼峰命名，單個詞），對應代碼中 `commands[]` 表的命令名稱。
     
 
 #### `cmd_get_file_header`（`ls`）
@@ -1689,24 +1691,24 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 1. **保留 DTB 位址**
    - 進入 `_start` 時，`x0` 由 QEMU 放入 DTB 位址
-   - 先以 `mov x19, x0` 將 DTB 暫存到 `x19`（`x19` 屬於 callee-saved，適合作為跨呼叫保存用） :contentReference[oaicite:0]{index=0}
+   - 先以 `mov x19, x0` 將 DTB 暫存到 `x19`（`x19` 屬於 callee-saved，適合作為跨呼叫保存用）
 
 2. **呼叫 relocation**
-   - `bl relocate_kernel` :contentReference[oaicite:1]{index=1}
+   - `bl relocate_kernel`
 
 3. **設定 Stack Pointer**
-   - `ldr x3, =_stack_top` → `mov sp, x3` :contentReference[oaicite:2]{index=2}
+   - `ldr x3, =_stack_top` → `mov sp, x3`
 
 4. **清空 `.bss`**
    - `x0 = __bss_start`, `x1 = __bss_end`
-   - `bl clear_bss` :contentReference[oaicite:3]{index=3}
+   - `bl clear_bss`
 
 5. **在呼叫 C 入口前，把 DTB 放回 `x0`**
    - `mov x0, x19`
-   - `bl kernel_main` :contentReference[oaicite:4]{index=4}
+   - `bl kernel_main`
 
 6. **避免返回**
-   - `b idle_loop`，用 `wfe` 無限等待 :contentReference[oaicite:5]{index=5} :contentReference[oaicite:6]{index=6}
+   - `b idle_loop`，用 `wfe` 無限等待
 
 ---
 
@@ -1717,15 +1719,15 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 **目的：** 如果「程式實際載入位址」與「linker 設定位址」不同，就把程式搬到 linker 指定位址，最後跳回 `_start` 重新走一次流程。
 
 - 取得目前執行中的 `_start` 位址（runtime）：
-  - `adr x0, _start` :contentReference[oaicite:7]{index=7}
+  - `adr x0, _start`
 - 取得 linker 指定的 `_start` 位址（linked）：
-  - `ldr x1, =_start` :contentReference[oaicite:8]{index=8}
+  - `ldr x1, =_start`
 - 若相同（不需搬移）：
-  - `beq _done` → `ret` :contentReference[oaicite:9]{index=9} :contentReference[oaicite:10]{index=10}
+  - `beq _done` → `ret`
 - 若不同（需要搬移）：
   - 以 `__bss_end - linked _start` 計算搬移長度到 `x2`
   - 以 8 bytes 為單位 `ldr/str` 搬移
-  - 搬完後 `br x1` 跳到 linker 設定的 `_start` :contentReference[oaicite:11]{index=11}
+  - 搬完後 `br x1` 跳到 linker 設定的 `_start`
 
 > 就現有行為來看：複製範圍以 `linked _start` 到 `__bss_end` 為界，屬於「把程式與資料搬到 linker 指定位置」的做法；`.bss` 的初始化不由此函式負責（`.bss` 由 `clear_bss` 另行清零）。
 
@@ -1734,25 +1736,20 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 **目的：清零 `__bss_start` 到 `__bss_end`。**
 
 - 參數約定：
-  - `x0 = start`, `x1 = end` :contentReference[oaicite:12]{index=12}
+  - `x0 = start`, `x1 = end`
 - 實作：
-  - `mov x2, x0` 用 `x2` 當迴圈指標 :contentReference[oaicite:13]{index=13}
-  - 迴圈中使用 `str xzr, [x2], #8` 以 8 bytes 為步進清零 :contentReference[oaicite:14]{index=14}
-  - 結束後 `ret` :contentReference[oaicite:15]{index=15}
+  - `mov x2, x0` 用 `x2` 當迴圈指標
+  - 迴圈中使用 `str xzr, [x2], #8` 以 8 bytes 為步進清零
+  - 結束後 `ret`
 
 #### 3) `idle_loop`
 
-- `wfe`（等待事件）後無限迴圈，避免落入未知區域 :contentReference[oaicite:16]{index=16}
+- `wfe`（等待事件）後無限迴圈，避免落入未知區域
 
 ---
 
-### 目前的限制/假設（就現況描述）
 - `.bss` 清零以 8 bytes 步進，隱含假設 `__bss_start`/`__bss_end` 至少對齊到 8（而 linker script 通常會用 `ALIGN` 保障）。
 - relocation 以 8 bytes 複製；若長度非 8 的倍數，現況未見額外尾端處理（多半仰賴 linker 對齊策略）。
-
-- **DTB 傳遞在 relocation 分支目前不完整：**
-  - `_start` 會先把 DTB 存在 `x19`，並在 `bl kernel_main` 前用 `mov x0, x19` 放回 `x0`（這段是正確 handoff） :contentReference[oaicite:17]{index=17}
-  - 但若發生 relocation，`_relocate_loop_done` 直接 `br x1` 跳回 `_start`，沒有在跳轉前把 `x0` 還原成 DTB；因此重新進 `_start` 時，`x0` 可能不是 DTB，導致 DTB 在 relocation 情境下遺失 :contentReference[oaicite:18]{index=18}
 
 
 # 14. 核心載入器邏輯 (Kernel Loader Logic)
@@ -1761,11 +1758,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-<<<<<<< HEAD
-Bootloader 的主流程（以 `kernel_main(void *dtb_addr)` 為入口）：透過 UART 與 host 溝通，接收 kernel size 與 kernel image，將 kernel 寫入 `KERNEL_LOAD_ADDRESS` 後跳轉執行。
-=======
 Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握手並接收 Kernel Image，最後將 `x0` 暫存器中的 DTB 指標傳遞給 Kernel 並跳轉執行。
->>>>>>> 55a765a (README更改)
 
 ### 內容概述
 
@@ -1833,27 +1826,6 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
 
 # 15. 作業系統核心主程式 (Kernel Main)
 
-<<<<<<< HEAD
-5. **接收 kernel image 並寫入固定載入位址**
-   - `char* kernel_code = (char*)KERNEL_LOAD_ADDRESS;`
-   - 迴圈 `i = 0..size-1`：
-     - `c = uart_recv();`
-     - `*kernel_code = c; kernel_code++;`
-
-6. **跳轉到 kernel entry**
-   - 目前用：
-     - `((void (*)(void))KERNEL_LOAD_ADDRESS)(dtb_addr);`
-   - 意味著「跳入 kernel entry 時，`x0` 仍帶著 DTB 位址」。
-
-### 目前的限制/假設（就現況描述）
-
-- 假設 host 端會依序送入：
-  1. `uart_recv_uint()` 可解析的 4 bytes size（依 `uart_recv_uint()` 的實作行為）
-  2. 緊接著送出 `size` bytes 的 kernel image
-- 此流程沒有檔案完整性檢查（checksum）、timeout、或錯誤復原；現況是「收到多少寫多少，寫完就跳」。
-# 12. 作業系統核心主程式(Kernel Main)
-=======
->>>>>>> 55a765a (README更改)
 ## `kernel_main.c`
 
 ### 檔案定位
@@ -1886,17 +1858,13 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 
 ### 目前提供的功能（實作）
 
-<<<<<<< HEAD
-#### `void kernel_main(void* dtb_addr)`
-> `dtb_addr` 由啟動程式 `boot.S`（以及 Bootloader 的 jump）透過 `x0` 轉交進來。
-=======
 #### 全域變數
->>>>>>> 55a765a (README更改)
 
 - `CtxT dtb_ctx;`：用於儲存 DTB 解析後的上下文資訊（如 initramfs 範圍）。
-    
 
 #### `void kernel_main(void* dtb_addr)`
+
+- `dtb_addr` 由啟動程式 `boot.S`（以及 Bootloader 的 jump）透過 `x0` 轉交進來。
 
 1. **接收 DTB**
     
@@ -1932,13 +1900,8 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 > 2. 此階段已能透過 `dtb_ctx` 取得 Initramfs 的記憶體位置，但尚未將其掛載到檔案系統層，Shell 目前仍使用 header 定義的 `FILE_HEADER` 或是需修改 Shell 邏輯來使用 `dtb_ctx` 的值。
 
 
-<<<<<<< HEAD
-# 13. Python 傳輸腳本 (Python Serial Script)
-## `Python/send_kernel.py`
-=======
 # 16. Python 傳輸腳本 (Python Serial Script)
 ## `send_kernel.py`
->>>>>>> 55a765a (README更改)
 
 ### 檔案定位
 
@@ -2534,8 +2497,4 @@ VS Code **C/C++（Microsoft C/C++ extension）**的 IntelliSense/語意分析設
 - `cStandard/cppStandard` 目前使用 `${default}`；`compilerArgs` 目前等同無額外參數（只有空字串）。
 ### 目前的限制/假設（就現況描述）
 
-<<<<<<< HEAD
 - 此組態的 `intelliSenseMode` 為 `linux-gcc-x64`，且 `compilerPath` 指向 `/usr/bin/gcc`；若你的實際 target 為 AArch64/bare-metal，IntelliSense 的內建巨集/型別模型可能與真實編譯環境不完全一致（這是目前檔案內容所呈現的狀態）。
-=======
-- 此組態的 `intelliSenseMode` 為 `linux-gcc-x64`，且 `compilerPath` 指向 `/usr/bin/gcc`；若你的實際 target 為 AArch64/bare-metal，IntelliSense 的內建巨集/型別模型可能與真實編譯環境不完全一致（這是目前檔案內容所呈現的狀態）。
->>>>>>> 55a765a (README更改)
