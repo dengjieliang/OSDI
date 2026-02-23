@@ -1,4 +1,5 @@
-    .section ".text"
+    /*a = SHF_ALLOC, x = SHF_EXECINSTR*/
+    .section .text, "ax"
 
     .globl exception_vector_table
     .type exception_vector_table, %object
@@ -52,6 +53,7 @@
     ldp x0, x1, [sp], #16
     .endm
 
+.balign 0x800      // 2KB (0x800)
 exception_vector_table:
     // ---- Group 1: Current EL, using SP_EL0 (offset 0x000) ----
     /*0x000: Synchronous*/
@@ -109,30 +111,32 @@ exception_vector_table:
 default_handler:
     SAVE_ALL
 
+    /*MRS = Move from System register*/
     /*x0 = ESR_EL1 (Exception Syndrome / reason)*/
-    msr x0, esr_el1
+    mrs x0, esr_el1
 
     /*x1 = ELR_EL1 (return address / faulting PC)*/
-    msr x1, elr_el1
+    mrs x1, elr_el1
 
     /*x2 = SPSR_EL1 (saved PSTATE)*/
-    msr x2, spsr_el1
+    mrs x2, spsr_el1
     bl  default_handler_dump_c
+1:  wfe
     b   1b
 
 el0_sync_entry:
     SAVE_ALL
     /*x0 = ESR_EL1 (Exception Syndrome / reason)*/
-    msr x0, esr_el1
+    mrs x0, esr_el1
 
     /*x1 = ELR_EL1 (return address / faulting PC)*/
-    msr x1, elr_el1
+    mrs x1, elr_el1
 
     /*x2 = SPSR_EL1 (saved PSTATE)*/
-    msr x2, spsr_el1
+    mrs x2, spsr_el1
 
     /*x3 = pass pointer to saved GPR context*/
-    msr x3, sp
+    mov x3, sp
     bl  el0_sync_handler_c
     RESTORE_ALL
     eret
@@ -140,20 +144,26 @@ el0_sync_entry:
 el0_irq_entry:
     SAVE_ALL
     /*x0 = ELR_EL1 (return address / faulting PC)*/
-    msr x0, elr_el1
+    mrs x0, elr_el1
 
     /*x1 = SPSR_EL1 (saved PSTATE)*/
-    msr x1, spsr_el1
+    mrs x1, spsr_el1
 
     /*x2 = pass pointer to saved GPR context*/
-    msr x2, sp
+    mov x2, sp
 
     bl  el0_irq_handler_c
     RESTORE_ALL
     eret
 
 set_exception_vector_table:
-    adr x0, exception_vector_table
+    /*x0 = (address(exception_vector_table) & ~0xFFF)（page base）*/
+    adrp x0, exception_vector_table
+
+    /*x0 = page_base(symbol) + (symbol & 0xFFF)*/
+    add  x0, x0, :lo12:exception_vector_table
+    
+    /*MSR = Move to System register*/
     msr vbar_el1, x0    /* Install vector base for EL1*/
     isb
     ret
