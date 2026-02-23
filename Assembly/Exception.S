@@ -109,6 +109,9 @@ exception_vector_table:
     .align 7
 
 default_handler:
+    msr daifset, #0xf
+    isb
+
     SAVE_ALL
 
     /*MRS = Move from System register*/
@@ -121,6 +124,8 @@ default_handler:
     /*x2 = SPSR_EL1 (saved PSTATE)*/
     mrs x2, spsr_el1
     bl  default_handler_dump_c
+    RESTORE_ALL
+    
 1:  wfe
     b   1b
 
