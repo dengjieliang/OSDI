@@ -123,6 +123,42 @@ void uart_send_integer(int number)
         return;
     }
 
+    if (number < 0)
+    {
+        uart_send('-');
+        number = -number;
+    }
+
+    char buffer[100];
+    unsigned int digit_size = 0;
+
+    while(number > 0)
+    {
+        buffer[digit_size] = (number % 10) + '0';
+        number /= 10;
+        digit_size += 1;
+    }
+
+    for (int i = digit_size - 1; i >= 0; i--)
+    {
+        uart_send(buffer[i]);
+    }
+}
+
+void uart_send_unsigned_long_integer(unsigned long number)
+{
+    if (number == 0)
+    {
+        uart_send('0');
+        return;
+    }
+
+    if (number < 0)
+    {
+        uart_send('-');
+        number = -number;
+    }
+
     char buffer[100];
     unsigned int digit_size = 0;
 

@@ -28,6 +28,9 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - relocate：將程式碼從載入位址搬移至 Linker 設定位址（Bootloader 為 0x60000）。
   - clear bss：清空 BSS，確保全域變數初始值為 0。
   - set sp：設定 Stack Pointer。
+- `Assembly/Exception.S`：
+    - exception vectors：建立 EL1 例外向量表並提供 `set_exception_vector_table` 安裝到 `VBAR_EL1`。
+    - context bridge：在例外入口保存/還原暫存器，轉交至 C handler（`el0_sync_handler_c` / `el0_irq_handler_c` / `default_handler_dump_c`；由 `CFile/exception.c` 提供）。
 - handoff：跳轉至 C 語言入口（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader build 的 `kernel_main` 即 Bootloader 主流程）。
 - `CFile/bootloader_main.c`：
   - UART init：初始化 Mini UART。
@@ -1751,6 +1754,90 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `.bss` 清零以 8 bytes 步進，隱含假設 `__bss_start`/`__bss_end` 至少對齊到 8（而 linker script 通常會用 `ALIGN` 保障）。
 - relocation 以 8 bytes 複製；若長度非 8 的倍數，現況未見額外尾端處理（多半仰賴 linker 對齊策略）。
 
+## `Exception.S`
+
+### 檔案定位
+
+此檔案提供 AArch64 EL1 例外向量表與進入點（exception entry stubs），負責：
+
+- 建立 `exception_vector_table`（符合 `VBAR_EL1` 所需的 2KB 對齊向量區）
+- 在例外入口保存/還原通用暫存器（`x0`~`x30`）
+- 擷取 `ESR_EL1 / ELR_EL1 / SPSR_EL1` 並轉呼叫 C handler
+- 提供 `set_exception_vector_table`，將向量表基底安裝到 `VBAR_EL1`
+
+### 內容概述
+
+此檔案把 EL1 的例外處理拆成「向量表分派」與「entry wrapper」兩層：向量表僅做最小跳轉，各類事件實際由 entry wrapper 保存上下文後再交給 C 端。
+
+- **C 端橋接實作位置**
+    - `default_handler_dump_c` / `el0_sync_handler_c` / `el0_irq_handler_c` 由 `CFile/exception.c` 實作，介面宣告於 `header/exception.h`。
+
+- **向量表配置（`exception_vector_table`）**
+    - 使用 `.balign 0x800` 對齊 2KB（AArch64 vector table 要求）。
+    - 依架構定義放置 4 組 × 4 類事件（Synchronous / IRQ / FIQ / SError），每個 slot 以 `.align 7` 對齊到 0x80 邊界。
+    - 目前已特化：
+        - Lower EL AArch64 的 Synchronous（offset `0x400`）→ `el0_sync_entry`
+        - Lower EL AArch64 的 IRQ（offset `0x480`）→ `el0_irq_entry`
+    - 其餘入口預設導向 `default_handler`。
+
+- **暫存器保存巨集（`SAVE_ALL` / `RESTORE_ALL`）**
+    - `SAVE_ALL`：以 `stp ... [sp, #-16]!` 連續 push，保存 `x0`~`x30`（最後搭配 `xzr` 補齊 16-byte）。
+    - `RESTORE_ALL`：以相反順序 `ldp ... [sp], #16` 還原，確保返回前 GPR 狀態一致。
+
+- **C handler 橋接**
+    - `el0_sync_entry`：
+        - 讀取 `esr_el1`→`x0`、`elr_el1`→`x1`、`spsr_el1`→`x2`
+        - `x3 = sp`（指向已保存的 GPR context）
+        - 呼叫 `el0_sync_handler_c`，之後 `eret`
+    - `el0_irq_entry`：
+        - 讀取 `elr_el1`→`x0`、`spsr_el1`→`x1`
+        - `x2 = sp`（保存後 context 指標）
+        - 呼叫 `el0_irq_handler_c`，之後 `eret`
+
+### 子程序說明
+
+#### 1) `default_handler`
+
+**目的：處理未特化或不預期的例外入口。**
+
+- `msr daifset, #0xf` 關閉中斷，避免錯誤擴散。
+- `SAVE_ALL` 後讀取：
+    - `x0 = ESR_EL1`
+    - `x1 = ELR_EL1`
+    - `x2 = SPSR_EL1`
+- 呼叫 `default_handler_dump_c` 交由 C 端輸出/診斷。
+- 進入 `wfe` 無限迴圈停住系統（不嘗試返回）。
+
+#### 2) `el0_sync_entry`
+
+**目的：處理來自 Lower EL（AArch64）同步例外。**
+
+- 保存完整 GPR context，擷取 syndrome/return 狀態寄存器。
+- 以 `x3=sp` 傳遞 context 指標給 `el0_sync_handler_c`。
+- 還原 context 後 `eret` 回到例外前流程。
+
+#### 3) `el0_irq_entry`
+
+**目的：處理來自 Lower EL（AArch64）IRQ。**
+
+- 保存完整 GPR context。
+- 傳入 `ELR/SPSR` 與 context 指標給 `el0_irq_handler_c`。
+- 還原後 `eret`。
+
+#### 4) `set_exception_vector_table`
+
+**目的：安裝 EL1 的例外向量基底位址。**
+
+- 用 `adrp + add :lo12:` 取得 `exception_vector_table` 絕對位址。
+- `msr vbar_el1, x0` 設定 EL1 vector base，`isb` 同步生效。
+- `ret` 返回呼叫端。
+
+### 現況注意（就現況描述）
+
+- `default_handler` 目前採「輸出診斷後停機等待」策略，不會 `eret` 返回。
+- 只有 Lower EL AArch64 的 Sync/IRQ 有專屬 entry，其他情況統一走 `default_handler`。
+- `SAVE_ALL/RESTORE_ALL` 依固定堆疊布局運作；C 端若要解析 `sp` 指向的 context，需遵守相同欄位順序。
+
 
 # 14. 核心載入器邏輯 (Kernel Loader Logic)
 
@@ -2133,11 +2220,13 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 
 #### 2) 原始碼收集與拆分
 
-- 指定兩個「主檔」：
+- 指定三個「流程主檔/橋接檔」：
     
     - `C_BOOT_SRC := CFile/bootloader_main.c`
         
     - `C_KERNEL_SRC := CFile/kernel_main.c`
+
+    - `C_EXCEPTION_SRC := CFile/exception.c`
         
 - 收集所有 C 與 Assembly：
     
@@ -2149,7 +2238,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
         
 - 將其餘 C 檔視為共用檔：
     
-    - `C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC), $(C_ALL))`
+    - `C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) $(C_EXCEPTION_SRC) CFile/shell.c, $(C_ALL))`
         
 
 #### 3) object 清單與「boot.o 需置前」
@@ -2161,14 +2250,24 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 - 共用 Assembly object（排除 `Assembly/boot.S`，因為 `boot.o` 需特別置前）：
     
     - `OBJ_ASM := ... $(filter-out Assembly/boot.S, $(S_ALL)) ... + (s_ALL)`
+
+    - 現況包含 `Assembly/Exception.S`，對應產生 `build/Exception.o`
         
 - 定義 `BOOT_START_OBJ := $(BUILD_DIR)/boot.o`
+
+- 定義 `EXCEPTION_C_OBJ := $(BUILD_DIR)/exception.o`
     
 - 最終兩組連結 object（現況邏輯）：
     
-    - `OBJS_FOR_BOOTLOADER := boot.o + 共用.o + bootloader_main.o`
+    - `OBJS_FOR_BOOTLOADER := boot.o + 共用.o + exception.o + bootloader_main.o`
         
-    - `OBJS_FOR_KERNEL := boot.o + 共用.o + kernel_main.o`
+    - `OBJS_FOR_KERNEL := boot.o + 共用.o + exception.o + shell.o + kernel_main.o`
+
+- 現況補充（`Exception.S` / `exception.c`）：
+
+    - `Assembly/Exception.S` 會呼叫 `default_handler_dump_c`、`el0_sync_handler_c`、`el0_irq_handler_c`，這三個符號由 `CFile/exception.c` 提供。
+
+    - 因為 `exception.c` 屬於「例外處理橋接」而非一般共用功能，`OBJS_FOR_BOOTLOADER` 與 `OBJS_FOR_KERNEL` 目前皆**顯式加入** `build/exception.o`，避免被 `C_COMMON` 的 filter 規則誤排除後造成 link error。
         
 
 #### 4) 產出檔案命名與 all/clean
