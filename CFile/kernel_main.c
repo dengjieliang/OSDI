@@ -2,6 +2,7 @@
 #include "../header/shell.h"
 #include "../header/dtb.h"
 #include "../header/fdtb.h"
+#include "../header/exception.h"
 
 CtxT dtb_ctx;
 
@@ -19,6 +20,9 @@ void kernel_main(void* dtb_addr)
 
     // 第二次初始化，雖然硬體已經開了，但為了保險，重新設定一次
     uart_init();
+
+    // 會直接吃.S檔案內的 exception_vector_table
+    set_exception_vector_table();
 
     uart_puts("\r\nWelcome to OSDI\r\n");
     

@@ -1,0 +1,2 @@
+qemu-system-aarch64 -machine raspi3b -kernel build/bootloader.img -initrd initramfs.cpio -dtb bcm2710-rpi-3-b-plus.dtb -display none -serial null -serial tcp:127.0.0.1:8888,server,nowait -S -s
+qemu-system-aarch64: QEMU: Terminated via GDBstub

@@ -19,6 +19,9 @@ static void cmd_reboot(int argc, char* argv[]);
 static void cmd_cancel_reboot(int argc, char* argv[]);
 static void cmd_get_file_header(int argc, char* argv[]);
 static void cmd_get_file_context(int argc, char* argv[]);
+static void cmd_test_el1_brk(int argc, char* argv[]);
+static void cmd_test_el1_svc(int argc, char* argv[]);
+static void cmd_test_el1_bad_read(int argc, char* argv[]);
 
 static void split_command(int* argc, char* argv[]);
 
@@ -32,6 +35,9 @@ static const Command_t commands[] =
     {"cancelReboot", "Cancel Reboot Computer", cmd_cancel_reboot},
     {"ls", "Get All File Header", cmd_get_file_header},
     {"cat", "Get File Context", cmd_get_file_context},
+    {"test_brk", "Test EL1 BRK", cmd_test_el1_brk},
+    {"test_svc", "Test EL1 SVC", cmd_test_el1_svc},
+    {"test_bad_read", "Test EL1 Bad Read", cmd_test_el1_bad_read},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -276,5 +282,28 @@ static void cmd_get_file_context(int argc, char* argv[])
         uart_puts("Cannot Find File");
         return;
     }
+}
+
+static void cmd_test_el1_brk(int argc, char* argv[]) 
+{
+    uart_puts("[TEST] EL1 BRK -> expect default_handler dump then hang\r\n");
+    asm volatile ("brk #0");
+    uart_puts("[TEST] should not reach here\r\n");
+}
+
+static void cmd_test_el1_svc(int argc, char* argv[]) 
+{
+    uart_puts("[TEST] EL1 SVC -> expect current-EL sync vector (default_handler) then hang\r\n");
+    asm volatile ("svc #0");
+    uart_puts("[TEST] should not reach here\r\n");
+}
+
+static void cmd_test_el1_bad_read(int argc, char* argv[]) 
+{
+    uart_puts("[TEST] EL1 bad read -> expect data abort dump then hang\r\n");
+    volatile unsigned long *p = (unsigned long *)0xFFFFFFFFFFFF0000UL; // 依你的平台可換更明顯無效位址
+    volatile unsigned long v = *p;
+    (void)v;
+    uart_puts("[TEST] should not reach here\r\n");
 }
 
