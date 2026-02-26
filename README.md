@@ -1838,6 +1838,47 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - 只有 Lower EL AArch64 的 Sync/IRQ 有專屬 entry，其他情況統一走 `default_handler`。
 - `SAVE_ALL/RESTORE_ALL` 依固定堆疊布局運作；C 端若要解析 `sp` 指向的 context，需遵守相同欄位順序。
 
+## `exception.h`
+
+### 檔案定位
+
+例外處理模組的對外介面宣告。此檔案提供 Assembly 與 C 互相銜接所需的函式原型，讓 `kernel_main.c` 可安裝向量表，並讓 `Exception.S` 可呼叫對應 C handler。
+
+### 目前提供的功能
+
+- 宣告向量表安裝函式：
+    - `void set_exception_vector_table(void);`
+- 宣告三個 C handler：
+    - `void default_handler_dump_c(unsigned long esr, unsigned long elr, unsigned long spsr);`
+    - `void el0_sync_handler_c(unsigned long esr, unsigned long elr, unsigned long spsr, unsigned long *ctx);`
+    - `void el0_irq_handler_c(unsigned long elr, unsigned long spsr, unsigned long *ctx);`
+
+### 現況注意（就現況描述）
+
+- 介面使用 `unsigned long` 與 AArch64 系統暫存器寬度對齊。
+- `ctx` 代表 `Exception.S` 保存完 GPR 後的 stack pointer；若 C 端要解析內容，需遵守 `SAVE_ALL` 的保存順序。
+
+## `exception.c`
+
+### 檔案定位
+
+`Exception.S` 的 C 端橋接實作。此檔案負責接收 Assembly 傳入的例外上下文資訊、輸出診斷訊息，並在部分情境採取停機或返回策略。
+
+### 內容概述
+
+- **共用輔助函式**
+    - `mask_all_exceptions()`：以 `msr daifset, #0xf` 屏蔽 FIQ/IRQ/SError/Debug，並 `isb` 立即生效。
+    - `read_far_el1()`：讀取 `FAR_EL1`，供 fault 診斷使用。
+- **handler 行為**
+    - `default_handler_dump_c(...)`：輸出 `ESR/ELR/SPSR/FAR` 後無限迴圈停住。
+    - `el0_sync_handler_c(...)`：輸出 syndrome 資訊；若 `EC == 0x15`（AArch64 SVC）則印出 `imm16` 後返回；其餘同步例外印出 `FAR_EL1` 並停住。
+    - `el0_irq_handler_c(...)`：先 mask 例外，輸出 `ELR/SPSR` 後返回。
+
+### 現況注意（就現況描述）
+
+- `ctx` 參數目前保留作為擴充（例如 dump 通用暫存器），現階段未被實際解讀。
+- `default_handler_dump_c` 與非 SVC 的 `el0_sync_handler_c` 目前策略皆為「診斷後停機」，偏向除錯導向而非可恢復流程。
+
 
 # 14. 核心載入器邏輯 (Kernel Loader Logic)
 
@@ -1921,7 +1962,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 
 ### 內容概述
 
-此檔案是 Kernel image 的主入口（`kernel_main(void *dtb_addr)`）：開機後先以 DTB 指標建立/解析裝置樹上下文（供後續 initrd / 硬體資訊使用），再初始化 UART 並進入 shell 互動迴圈。
+此檔案是 Kernel image 的主入口（`kernel_main(void *dtb_addr)`）：開機後先以 DTB 指標建立/解析裝置樹上下文（供後續 initrd / 硬體資訊使用），再初始化 UART、安裝例外向量表，最後進入 shell 互動迴圈。
 
 - **DTB 解析與上下文初始化**
   - 使用全域 `dtb_ctx` 作為 DTB 解析與狀態保存的 context。
@@ -1930,6 +1971,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
   - 若解析失敗，目前分支為空（尚未做錯誤輸出/復原）。
 - **UART 與互動主迴圈**
   - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
+    - 呼叫 `set_exception_vector_table()` 安裝 EL1 例外向量基底（使用 `Exception.S` 內的 `exception_vector_table`）。
   - 輸出 `Welcome to OSDI`。
   - 呼叫 `shell_main()` 進入互動模式，接收使用者輸入並輸出結果。
 ### 相依性（就現況）
@@ -1941,6 +1983,8 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 - `../header/dtb.h`：`ReadDTBFile` 解析函式。
     
 - `../header/fdtb.h`：`CtxT` 結構與 `Initrd_Handler` 邏輯。
+
+- `../header/exception.h`：`set_exception_vector_table()` 宣告。
     
 
 ### 目前提供的功能（實作）
@@ -1972,8 +2016,12 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 3. **重新初始化 UART**
     
     - 呼叫 `uart_init()` 確保硬體狀態（雖然 Bootloader 已開過，但重設以保險）。
+
+4. **安裝例外向量表**
+
+    - 呼叫 `set_exception_vector_table()`，將 EL1 的 `VBAR_EL1` 指向 `Exception.S` 內的 `exception_vector_table`。
         
-4. **進入 Shell**
+5. **進入 Shell**
     
     - 印出 `Welcome to OSDI`。
         
