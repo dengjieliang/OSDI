@@ -41,8 +41,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": false,
-      "cwd": "/home/marginal/osdi-wsl-starter/osdi-lab0/CFile",
-      "program": "/home/marginal/osdi-wsl-starter/osdi-lab0/CFile/build/Debug/outDebug",
+      "cwd": "/home/marginal/osdi-wsl-starter/osdi-lab0",
+      "program": "/home/marginal/osdi-wsl-starter/osdi-lab0/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

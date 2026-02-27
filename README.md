@@ -28,7 +28,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - relocate：將程式碼從載入位址搬移至 Linker 設定位址（Bootloader 為 0x60000）。
   - clear bss：清空 BSS，確保全域變數初始值為 0。
   - set sp：設定 Stack Pointer。
-- `Assembly/Exception.S`：
+- `Assembly/exception_table.S`：
     - exception vectors：建立 EL1 例外向量表並提供 `set_exception_vector_table` 安裝到 `VBAR_EL1`。
     - context bridge：在例外入口保存/還原暫存器，轉交至 C handler（`el0_sync_handler_c` / `el0_irq_handler_c` / `default_handler_dump_c`；由 `CFile/exception.c` 提供）。
 - handoff：跳轉至 C 語言入口（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader build 的 `kernel_main` 即 Bootloader 主流程）。
@@ -1754,7 +1754,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `.bss` 清零以 8 bytes 步進，隱含假設 `__bss_start`/`__bss_end` 至少對齊到 8（而 linker script 通常會用 `ALIGN` 保障）。
 - relocation 以 8 bytes 複製；若長度非 8 的倍數，現況未見額外尾端處理（多半仰賴 linker 對齊策略）。
 
-## `Exception.S`
+## `exception_table.S`
 
 ### 檔案定位
 
@@ -1842,7 +1842,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-例外處理模組的對外介面宣告。此檔案提供 Assembly 與 C 互相銜接所需的函式原型，讓 `kernel_main.c` 可安裝向量表，並讓 `Exception.S` 可呼叫對應 C handler。
+例外處理模組的對外介面宣告。此檔案提供 Assembly 與 C 互相銜接所需的函式原型，讓 `kernel_main.c` 可安裝向量表，並讓 `exception_table.S` 可呼叫對應 C handler。
 
 ### 目前提供的功能
 
@@ -1856,13 +1856,13 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 ### 現況注意（就現況描述）
 
 - 介面使用 `unsigned long` 與 AArch64 系統暫存器寬度對齊。
-- `ctx` 代表 `Exception.S` 保存完 GPR 後的 stack pointer；若 C 端要解析內容，需遵守 `SAVE_ALL` 的保存順序。
+- `ctx` 代表 `exception_table.S` 保存完 GPR 後的 stack pointer；若 C 端要解析內容，需遵守 `SAVE_ALL` 的保存順序。
 
 ## `exception.c`
 
 ### 檔案定位
 
-`Exception.S` 的 C 端橋接實作。此檔案負責接收 Assembly 傳入的例外上下文資訊、輸出診斷訊息，並在部分情境採取停機或返回策略。
+`exception_table.S` 的 C 端橋接實作。此檔案負責接收 Assembly 傳入的例外上下文資訊、輸出診斷訊息，並在部分情境採取停機或返回策略。
 
 ### 內容概述
 
@@ -1971,7 +1971,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
   - 若解析失敗，目前分支為空（尚未做錯誤輸出/復原）。
 - **UART 與互動主迴圈**
   - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
-    - 呼叫 `set_exception_vector_table()` 安裝 EL1 例外向量基底（使用 `Exception.S` 內的 `exception_vector_table`）。
+    - 呼叫 `set_exception_vector_table()` 安裝 EL1 例外向量基底（使用 `exception_table.S` 內的 `exception_vector_table`）。
   - 輸出 `Welcome to OSDI`。
   - 呼叫 `shell_main()` 進入互動模式，接收使用者輸入並輸出結果。
 ### 相依性（就現況）
@@ -2019,7 +2019,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 
 4. **安裝例外向量表**
 
-    - 呼叫 `set_exception_vector_table()`，將 EL1 的 `VBAR_EL1` 指向 `Exception.S` 內的 `exception_vector_table`。
+    - 呼叫 `set_exception_vector_table()`，將 EL1 的 `VBAR_EL1` 指向 `exception_table.S` 內的 `exception_vector_table`。
         
 5. **進入 Shell**
     
@@ -2299,7 +2299,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     
     - `OBJ_ASM := ... $(filter-out Assembly/boot.S, $(S_ALL)) ... + (s_ALL)`
 
-    - 現況包含 `Assembly/Exception.S`，對應產生 `build/Exception.o`
+    - 現況包含 `Assembly/exception_table.S`，對應產生 `build/exception_table.o`
         
 - 定義 `BOOT_START_OBJ := $(BUILD_DIR)/boot.o`
 
@@ -2311,9 +2311,9 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
         
     - `OBJS_FOR_KERNEL := boot.o + 共用.o + exception.o + shell.o + kernel_main.o`
 
-- 現況補充（`Exception.S` / `exception.c`）：
+- 現況補充（`exception_table.S` / `exception.c`）：
 
-    - `Assembly/Exception.S` 會呼叫 `default_handler_dump_c`、`el0_sync_handler_c`、`el0_irq_handler_c`，這三個符號由 `CFile/exception.c` 提供。
+    - `Assembly/exception_table.S` 會呼叫 `default_handler_dump_c`、`el0_sync_handler_c`、`el0_irq_handler_c`，這三個符號由 `CFile/exception.c` 提供。
 
     - 因為 `exception.c` 屬於「例外處理橋接」而非一般共用功能，`OBJS_FOR_BOOTLOADER` 與 `OBJS_FOR_KERNEL` 目前皆**顯式加入** `build/exception.o`，避免被 `C_COMMON` 的 filter 規則誤排除後造成 link error。
         
