@@ -64,10 +64,27 @@ ELF_BOOT   := $(BUILD_DIR)/bootloader.elf
 IMG_KERNEL := $(BUILD_DIR)/kernel8.img
 ELF_KERNEL := $(BUILD_DIR)/kernel8.elf
 
+LABTEST_DIR    := LabTest
+INITRAMFS_IMG  := initramfs.cpio
+
+LABTEST_ALL_FILES := $(wildcard $(LABTEST_DIR)/*)
+LABTEST_SRC_S     := $(filter %.S,$(LABTEST_ALL_FILES))
+LABTEST_SRC_C     := $(filter %.c,$(LABTEST_ALL_FILES))
+LABTEST_SRC_H     := $(filter %.h,$(LABTEST_ALL_FILES))
+LABTEST_SRC_FILES := $(LABTEST_SRC_S) $(LABTEST_SRC_C) $(LABTEST_SRC_H)
+
+LABTEST_OBJ_S     := $(patsubst $(LABTEST_DIR)/%.S,$(LABTEST_DIR)/%.o,$(LABTEST_SRC_S))
+LABTEST_OBJ_C     := $(patsubst $(LABTEST_DIR)/%.c,$(LABTEST_DIR)/%_c.o,$(LABTEST_SRC_C))
+LABTEST_OBJ_H     := $(patsubst $(LABTEST_DIR)/%.h,$(LABTEST_DIR)/%_h.o,$(LABTEST_SRC_H))
+LABTEST_OBJ_FILES := $(LABTEST_OBJ_S) $(LABTEST_OBJ_C) $(LABTEST_OBJ_H)
+
+LABTEST_OTHER_FILES := $(filter-out $(LABTEST_SRC_FILES) $(LABTEST_OBJ_FILES),$(LABTEST_ALL_FILES))
+LABTEST_PACK_FILES  := $(LABTEST_OBJ_FILES) $(LABTEST_OTHER_FILES)
+
 .PHONY: all clean qemu qemu-gdb
 
 # make all 會同時產生兩個 img
-all: $(IMG_BOOT) $(IMG_KERNEL)
+all: $(IMG_BOOT) $(IMG_KERNEL) $(INITRAMFS_IMG)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -90,6 +107,19 @@ $(IMG_KERNEL): $(ELF_KERNEL)
 $(ELF_KERNEL): $(OBJS_FOR_KERNEL) linker_kernel.ld | $(BUILD_DIR)
 	$(LD) -T linker_kernel.ld -o $@ $(OBJS_FOR_KERNEL)
 
+# ---- LabTest sources to object for initramfs ----
+$(LABTEST_DIR)/%.o: $(LABTEST_DIR)/%.S
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(LABTEST_DIR)/%_c.o: $(LABTEST_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(LABTEST_DIR)/%_h.o: $(LABTEST_DIR)/%.h
+	$(CC) $(CFLAGS) -x c -c $< -o $@
+
+$(INITRAMFS_IMG): $(LABTEST_PACK_FILES)
+	cd $(LABTEST_DIR) && printf '%s\n' $(notdir $(LABTEST_PACK_FILES)) | cpio -o -H newc > ../$@
+
 # ---- 編譯 C 與 Assembly ----
 $(BUILD_DIR)/%.o: CFile/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -102,6 +132,7 @@ $(BUILD_DIR)/%.o: Assembly/%.s | $(BUILD_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -f $(LABTEST_OBJ_FILES) $(INITRAMFS_IMG)
 
 # ==========================================
 # 7. QEMU 執行設定
