@@ -6,8 +6,8 @@
 #include "../header/power_manager.h"
 #include "../header/time.h"
 #include "../header/cpio.h"
-#include "../header/allocator.h"
-#include "fdtb.h"
+#include "../header/fdtb.h"
+#include "../header/user_mode.h"
 
 static bool reboot_lock = false;
 
@@ -22,6 +22,7 @@ static void cmd_get_file_context(int argc, char* argv[]);
 static void cmd_test_el1_brk(int argc, char* argv[]);
 static void cmd_test_el1_svc(int argc, char* argv[]);
 static void cmd_test_el1_bad_read(int argc, char* argv[]);
+static void cmd_test_el0_user_mode(int argc, char* argv[]);
 
 static void split_command(int* argc, char* argv[]);
 
@@ -38,6 +39,7 @@ static const Command_t commands[] =
     {"test_brk", "Test EL1 BRK", cmd_test_el1_brk},
     {"test_svc", "Test EL1 SVC", cmd_test_el1_svc},
     {"test_bad_read", "Test EL1 Bad Read", cmd_test_el1_bad_read},
+    {"test_user_mode", "Test User Mode", cmd_test_el0_user_mode},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -307,3 +309,29 @@ static void cmd_test_el1_bad_read(int argc, char* argv[])
     uart_puts("[TEST] should not reach here\r\n");
 }
 
+static void cmd_test_el0_user_mode(int argc, char* argv[])
+{
+    uart_puts("[TEST] EL0 user mode -> expect switch to EL0 then print user mode message\r\n");
+    void* user_start_addr = 0;; // 依你的平台可換更明顯的EL0程式位址
+    unsigned long user_size = 0;
+
+    extern CtxT dtb_ctx;
+
+    void * header = (void *)dtb_ctx.initrd_start;
+    bool get_file_data_success = CpioGetFileData(header, argv[1], &user_start_addr, &user_size);
+
+
+    if (get_file_data_success == false)
+    {
+        uart_puts("Cannot Find File");
+        return;
+    }
+    else
+    {
+        static unsigned char user_stack[4096] __attribute__((aligned(16)));
+        unsigned long user_stack_top = (unsigned long)(user_stack + sizeof(user_stack));
+        enter_el0((unsigned long)user_start_addr, user_stack_top);
+    }
+    uart_puts("[TEST] should not reach here\r\n");
+
+}

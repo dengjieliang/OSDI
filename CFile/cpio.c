@@ -28,6 +28,11 @@ static bool CompareFileName(cpio_header_t* file, char* cmp_name, int cmp_size);
 
 int CpioGetFilesHeaderName(void *file_header)
 {
+    if (file_header == NULL)
+    {
+        return false;
+    }
+    
     cpio_header_t* header = (cpio_header_t *)file_header;
 
     int file_count = 0;
@@ -70,8 +75,60 @@ int CpioGetFilesHeaderName(void *file_header)
     return file_count;
 }
 
+bool CpioGetFileData(void *file_header, char* file_name, void **out_data, unsigned long *out_size)
+{
+    if (file_header == NULL || file_name == NULL || out_data == NULL || out_size == NULL)
+    {
+        return false;
+    }
+
+    cpio_header_t* header = (cpio_header_t *)file_header;
+
+    if (strncmp(header->c_magic, "070701", 6) != 0)
+    {
+        return false;
+    }
+
+    while(1)
+    {
+        //確保file的檔名和使用者輸入的完全相符合
+        if (CompareFileName(header, file_name, strlen(file_name) + 1 ))
+        {
+            unsigned long file_context_size = hex2UnsignedLong(header->c_filesize, 8);
+            unsigned long file_header_size = hex2UnsignedLong(header->c_namesize, 8);
+
+            header = (cpio_header_t*)((char *)header + 110);
+            header = (cpio_header_t*)((char *)header + file_header_size);
+
+            unsigned long current_ptr = (unsigned long)header;
+            current_ptr = ALIGN4(current_ptr);
+            *out_data = (void *)current_ptr;
+            *out_size = file_context_size;
+            
+            return true;
+        }
+        else
+        {
+            file_header = GetNextHeader((void*)file_header);
+            
+            if (file_header == NULL)
+            {
+                break;
+            }
+            header = (cpio_header_t *)file_header;
+        }
+    }
+
+    return false;
+}
+
 bool CpioGetFileContext(void *file_header, char* file_name)
 {
+    if (file_header == NULL || file_name == NULL)
+    {
+        return false;
+    }
+
     cpio_header_t* header = (cpio_header_t *)file_header;
 
     if (strncmp(header->c_magic, "070701", 6) != 0)

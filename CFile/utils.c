@@ -42,6 +42,30 @@ int hex2int(char *hex, int n)
     return result;
 }
 
+unsigned long hex2UnsignedLong(char *hex, int n)
+{
+    unsigned long result = 0;
+
+    for (int i = 0; i < n; i++)
+    {
+        result *= 16;
+
+        if (hex[i] >= 'a')
+        {
+            result += (10 + (hex[i] - 'a'));
+        }
+        else if (hex[i] >= 'A')
+        {
+            result += (10 + (hex[i] - 'A'));
+        }
+        else
+        {
+            result += (hex[i] - '0');
+        }
+    }
+
+    return result;
+}
 
 unsigned int reverseint(unsigned int number)
 {
