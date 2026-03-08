@@ -47,7 +47,7 @@ static inline void core_timer_enable()
 
 static inline void unmask_timer_interrupt()
 {
-    volatile  unsigned int* timer_irq_ctrl = (unsigned int*)CORE0_TIMER_IRQ_CTRL;
+    volatile unsigned int* timer_irq_ctrl = (unsigned int*)CORE0_TIMER_IRQ_CTRL;
     *timer_irq_ctrl = 2; // unmask timer interrupt
 }
 

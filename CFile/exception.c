@@ -1,5 +1,8 @@
 #include "../header/uart.h"
+#include "../header/time.h"
 #include "../header/exception.h"
+
+#define CORE0_INTERRUPT_SOURCE 0x40000060
 
 static inline void mask_all_exceptions(void)
 {
@@ -108,6 +111,27 @@ void el0_irq_handler_c(unsigned long elr, unsigned long spsr, unsigned long *ctx
     uart_send_unsigned_long_integer(spsr); 
     uart_puts("\n");
 
+
+    // 讀取 Core 0 Interrupt Source
+    unsigned int irq_src = *((volatile unsigned int*)CORE0_INTERRUPT_SOURCE);
+
+    // Bit 1 (值為 2) 代表 CNTPNSIRQ (Core Timer Interrupt)
+    if (irq_src == 2)
+    {
+        uart_puts("Core Timer Interrupt! Time: ");
+        get_timetick(); // 印出目前秒數
+        uart_puts("\n");
+
+        // Exercise 2 規定：下次 timeout 設為 2 秒後
+        set_core_timer_interrupt_second(2);
+    }
+    else
+    {
+        // 處理未知的中斷
+        uart_puts("\n[EL0 IRQ] Unknown IRQ source: 0x");
+        uart_send_hex(irq_src);
+        uart_puts("\n");
+    }
     return;
 
 }

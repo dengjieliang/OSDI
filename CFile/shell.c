@@ -328,6 +328,7 @@ static void cmd_test_el0_user_mode(int argc, char* argv[])
     }
     else
     {
+        core_timer_enable_second(1);
         static unsigned char user_stack[4096] __attribute__((aligned(16)));
         unsigned long user_stack_top = (unsigned long)(user_stack + sizeof(user_stack));
         enter_el0((unsigned long)user_start_addr, user_stack_top);

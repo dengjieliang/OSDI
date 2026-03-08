@@ -8,12 +8,12 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - 目前可在 QEMU 上啟動 Bootloader，Bootloader 會先透過 UART 對 Host 輸出 `OSDI: Ready`，表示已就緒並等待載入 Kernel。
 - Host 端執行 `Python/send_kernel.py` 連線到 QEMU Serial Port（127.0.0.1:8888），並依協定送出 Kernel Size（Little Endian）與 `build/kernel8.img` 內容。
 - Bootloader 會把 Kernel 寫入 `KERNEL_LOAD_ADDRESS (0x80000)`，再以 Function Pointer 方式跳轉到 Kernel Entry Point。
-- Kernel 啟動後會再次初始化 UART，印出 `Welcome to OSDI`，接著呼叫 `shell_main()` 進入互動模式。
-- 整體資料流為：先使用 `make all` 完成建置（產出 `build/bootloader.img` / `build/kernel8.img`）→ 再以 `make qemu-gdb` 啟動 QEMU（GDB Server :1234 + Serial Server :8888）→ Host（send_kernel.py） → Bootloader（UART handshake + load） → Kernel（print + init） → Shell（互動輸入輸出）。
+- Kernel 啟動後會先解析 DTB、安裝 EL1 例外向量表，再重新初始化 UART，印出 `Welcome to OSDI`，最後呼叫 `shell_main()` 進入互動模式。
+- 整體資料流為：先使用 `make all` 完成建置（產出 `build/bootloader.img` / `build/kernel8.img` / `initramfs.cpio`）→ 再以 `make qemu-gdb` 啟動 QEMU（GDB Server :1234 + Serial Server :8888）→ Host（send_kernel.py） → Bootloader（UART handshake + load + handoff DTB） → Kernel（parse DTB + install vectors + UART init） → Shell（互動輸入輸出）。
 
 ## 0.2 建置與執行流程（Build & Run Pipeline）
 
-- Makefile：設定 aarch64-linux-gnu- 交叉編譯工具鏈，並將 Bootloader / Kernel 分開建置成兩個 Image（`build/bootloader.img`、`build/kernel8.img`）。
+- Makefile：設定 aarch64-linux-gnu- 交叉編譯工具鏈，並建置 `build/bootloader.img`、`build/kernel8.img`，同時自動打包 `initramfs.cpio`（包含 `LabTest` 測試檔）。
 - Makefile Targets：提供 `make qemu` 啟動 QEMU 模擬；`make qemu-gdb` 啟動 QEMU 並開啟 GDB Server（:1234）與 Serial Server（:8888）。
 - Linker Scripts：
   - `linker_boot.ld`：設定 Bootloader Entry Point 為 0x60000，並定義 BSS 與 Stack Top。
@@ -41,9 +41,11 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 ## 0.4 Kernel 主流程（Kernel Core / Interactive Loop）
 
 - `CFile/kernel_main.c`：
-  - re-init UART：再次初始化 UART（確保硬體狀態正確）。
-  - print welcome：印出 `Welcome to OSDI` 確認已進入 Kernel。
-  - enter shell：呼叫 `shell_main()` 進入互動模式。
+    - parse DTB：先呼叫 `InitialDtbCtx(&dtb_ctx)`，再用 `ReadDTBFile(dtb_addr, Initrd_Handler, &dtb_ctx)` 解析 bootloader 傳入的 DTB。
+    - re-init UART：再次初始化 UART（確保硬體狀態正確）。
+    - install vectors：呼叫 `set_exception_vector_table()`，將 EL1 例外向量表安裝到 `VBAR_EL1`。
+    - print welcome：印出 `Welcome to OSDI` 確認已進入 Kernel。
+    - enter shell：呼叫 `shell_main()` 進入互動模式。
 
 ## 0.5 核心硬體依賴（Drivers & Peripherals）
 
@@ -52,7 +54,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - init：設定 GPIO14/15 為 ALT5、設定 Baud Rate（115200）、關閉 Flow Control。
   - polling I/O：`uart_send()` 輪詢 TX FIFO、`uart_recv()` 輪詢 RX FIFO。
   - helpers：提供 uart_puts、uart_send_hex、uart_recv_uint 等輔助函式。
-- （建議後續新增 mailbox / timer / power / cpio / dtb 時）撰寫順序可採「被誰呼叫 → 提供什麼 API → 影響哪個功能」，以維持可讀性與依賴關係清晰。
+- （後續若再新增其他 driver/module）撰寫順序可採「被誰呼叫 → 提供什麼 API → 影響哪個功能」，以維持可讀性與依賴關係清晰。
 
 ## 0.6 Host 端工具（Host Tools）
 
@@ -1084,7 +1086,11 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-提供時間（system timer）輸出功能的介面宣告。
+提供 AArch64 Generic Timer（system counter + core timer）相關介面宣告，包含：
+
+- 目前時間讀取/輸出（timetick）
+- Core timer compare value 設定（以 tick 或秒為單位）
+- Core timer 啟用與 IRQ unmask 的封裝函式
 
 ### 目前提供的功能
 
@@ -1092,7 +1098,13 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
     - `void get_timetick();`
         
-        - 由 `time.c` 實作：讀取 system counter 與頻率，計算並輸出目前「秒與小數」格式的時間值。
+    - `void set_core_timer_interrupt_tick(unsigned long long timer_count);`
+        
+    - `void set_core_timer_interrupt_second(unsigned long second);`
+        
+    - `void core_timer_enable_tick(unsigned long tick);`
+        
+    - `void core_timer_enable_second(unsigned long second);`
             
 
 ---
@@ -1102,7 +1114,12 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-在 AArch64 環境下，透過系統暫存器讀取 system counter（`cntpct_el0`）與 counter frequency（`cntfrq_el0`），並將目前時間以 UART 輸出。
+在 AArch64 環境下，透過系統暫存器存取 Generic Timer：
+
+- 讀取 system counter（`cntpct_el0`）與頻率（`cntfrq_el0`）
+- 設定 core timer compare value（`cntp_tval_el0`）
+- 啟用 `cntp_ctl_el0` 並 unmask `CORE0_TIMER_IRQ_CTRL` 對應的 timer interrupt
+- 提供 timetick 輸出與「以 tick / 秒為單位」的 timer 啟用 API
 
 ### 相依性（就現況）
 
@@ -1133,7 +1150,18 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - 回傳 `cntfrq_el0` 讀到的計數器頻率（`unsigned long long`）
     
 
-#### 3) 對外 API：`void get_timetick()`
+#### 3) 內部 helper：`static inline void core_timer_enable()`
+
+- 設定 `cntp_ctl_el0`：
+    - bit0（enable）= 1
+    - bit1（imask）= 0（不遮罩 interrupt）
+- 透過 `msr cntp_ctl_el0, %0` + `isb` 讓設定立即生效。
+
+#### 4) 內部 helper：`static inline void unmask_timer_interrupt()`
+
+- 以 MMIO 寫入 `CORE0_TIMER_IRQ_CTRL (0x40000040)` 為 `2`，開啟 core timer 對應 IRQ。
+
+#### 5) 對外 API：`void get_timetick()`
 
 - 行為流程（就現況）：
     
@@ -1158,9 +1186,37 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
         - 輸出 `'.'`
             
         - 輸出 4 位小數：`uart_send_decimal_part(decimal_part, 4)`
+
+#### 6) 對外 API：`void set_core_timer_interrupt_tick(unsigned long long timer_count)`
+
+- 透過 `msr cntp_tval_el0, %0` 設定下一次 timer compare 觸發值（單位：tick）。
+
+#### 7) 對外 API：`void set_core_timer_interrupt_second(unsigned long second)`
+
+- 先讀取 `timer_freq = cntfrq_el0`。
+- 將秒數換算為 tick：`timer_count = second * timer_freq`。
+- 呼叫 `set_core_timer_interrupt_tick(timer_count)` 完成設定。
+
+#### 8) 對外 API：`void core_timer_enable_tick(unsigned long tick)`
+
+- 依序執行：
+    - `core_timer_enable()`
+    - `set_core_timer_interrupt_tick(tick)`
+    - `unmask_timer_interrupt()`
+
+#### 9) 對外 API：`void core_timer_enable_second(unsigned long second)`
+
+- 依序執行：
+    - `core_timer_enable()`
+    - `set_core_timer_interrupt_second(second)`
+    - `unmask_timer_interrupt()`
             
 
-> 現況注意：此函式本身**不輸出換行**；顯示換行與否由呼叫端決定。另外它將計算結果存入 `int`（整數秒與小數），在長時間運行下是否溢位取決於執行時間與 `int` 寬度，但程式碼現況並未處理溢位或格式化邊界。
+> 現況注意：
+>
+> 1. `get_timetick()` 本身**不輸出換行**；顯示換行與否由呼叫端決定。
+> 2. `get_timetick()` 目前將結果暫存在 `int`（整數秒與小數），長時間運行可能受 `int` 位寬限制。
+> 3. 這個模組目前只負責「設定與開啟 timer」，IRQ 進來後的事件處理（例如重新設下一次 compare、清中斷來源）需由中斷 handler 流程另外實作。
 
 
 # 11. 簡易命令列介面 (Shell)
@@ -1212,7 +1268,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
 - 接收一行輸入並進行字串切割（argc/argv）
     
-- 依命令表執行對應指令（hello/help/info/time/reboot/cancel/ls/cat）
+- 依命令表執行對應指令（hello/help/info/time/reboot/cancel/ls/cat/test_brk/test_svc/test_bad_read/test_user_mode）
     
 
 ### 內容概述
@@ -1235,6 +1291,10 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `cancelReboot`：取消 reset（並解除 reboot lock）
 - `ls`：列出 initramfs 內檔名（header 來源為 DTB context 的 `initrd_start`）
 - `cat`：輸出指定檔案內容（header 來源同上）
+- `test_brk`：在 EL1 觸發 `brk #0`，預期進 default exception dump 後停住
+- `test_svc`：在 EL1 觸發 `svc #0`，預期進 current-EL sync 路徑（目前也會進 default dump）
+- `test_bad_read`：在 EL1 嘗試讀取無效位址，預期 data abort dump 後停住
+- `test_user_mode`：從 initramfs 讀取指定檔案起始位址，切換到 EL0 執行
 
 現況注意（以程式碼行為為準）：
 
@@ -1281,6 +1341,14 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `ls`：列出 initramfs 內檔名（以 DTB context 的 `initrd_start` 為起點）
     
 - `cat`：輸出指定檔案內容（以 DTB context 的 `initrd_start`為起點）
+
+- `test_brk`：觸發 EL1 `brk #0`，預期進 default handler dump
+
+- `test_svc`：觸發 EL1 `svc #0`，預期進 current-EL sync/default dump
+
+- `test_bad_read`：觸發 EL1 data abort（讀取無效位址）
+
+- `test_user_mode`：讀取 initramfs 中指定檔案位址，啟用 core timer（1 秒）後切換至 EL0
     
 - 尾端 sentinel：`{NULL, NULL}`
     
@@ -1872,12 +1940,55 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - **handler 行為**
     - `default_handler_dump_c(...)`：輸出 `ESR/ELR/SPSR/FAR` 後無限迴圈停住。
     - `el0_sync_handler_c(...)`：輸出 syndrome 資訊；若 `EC == 0x15`（AArch64 SVC）則印出 `imm16` 後返回；其餘同步例外印出 `FAR_EL1` 並停住。
-    - `el0_irq_handler_c(...)`：先 mask 例外，輸出 `ELR/SPSR` 後返回。
+    - `el0_irq_handler_c(...)`：先 mask 例外，輸出 `ELR/SPSR`、印出目前 timetick，並重設下一次 core timer 觸發為 2 秒後再返回。
 
 ### 現況注意（就現況描述）
 
 - `ctx` 參數目前保留作為擴充（例如 dump 通用暫存器），現階段未被實際解讀。
 - `default_handler_dump_c` 與非 SVC 的 `el0_sync_handler_c` 目前策略皆為「診斷後停機」，偏向除錯導向而非可恢復流程。
+- `el0_irq_handler_c` 目前沒有在 C 端額外做 interrupt source ack（只負責輸出與重設 next timeout）；目前流程依賴既有 timer 路徑可持續觸發。
+
+## `user_mode_entry.S`
+
+### 檔案定位
+
+提供從 EL1 切換到 EL0 的最小入口實作（`enter_el0`）。此檔案不負責建立完整 user context，而是接收 C 端傳入的「使用者程式起始位址」與「EL0 stack top」，設定必要系統暫存器後用 `eret` 落入 EL0 執行。
+
+### 目前提供的功能（實作）
+
+- 對外符號：`enter_el0`
+    - 參數約定：
+        - `x0 = user_start_addr`
+        - `x1 = user_stack_top`
+- 進入流程：
+    1. `mov x2, 0x0`，並 `msr spsr_el1, x2`
+        - 設定返回狀態為 `EL0t`
+    2. `msr elr_el1, x0`
+        - 指定 `eret` 後的 PC（user entry）
+    3. `msr sp_el0, x1`
+        - 設定 EL0 stack pointer
+    4. `isb` 後 `eret`
+        - 正式從 EL1 切換到 EL0 執行
+
+### 現況注意（就現況描述）
+
+- `spsr_el1` 目前直接寫 `0x0`，屬於最精簡設定；若後續要細緻控制中斷 mask/flag，需擴充此段。
+- 此入口未建立 page table / 權限隔離 / 系統呼叫框架；目前定位是「最小 EL0 跳轉機制」。
+
+## `user_mode.h`
+
+### 檔案定位
+
+宣告 user mode 切換入口函式，讓 C 程式可呼叫組語實作的 `enter_el0`。
+
+### 目前提供的功能
+
+- 對外宣告：
+    - `extern void enter_el0(unsigned long user_start_addr, unsigned long user_stack_top);`
+
+### 現況注意（就現況描述）
+
+- 介面只負責「傳入 entry 與 stack」，其餘 user context（例如 argument 傳遞、暫存器預設值）由呼叫端自行決定。
 
 
 # 14. 核心載入器邏輯 (Kernel Loader Logic)
@@ -1911,7 +2022,7 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
 
 ### 目前提供的功能（實作）
 
-#### `void kernel_main(void *dtb_addr)`
+#### `void kernel_main(void *dtb)`
 
 - 作為 C 語言入口點（由 `boot.S` 呼叫），直接轉呼叫 `bootloader_main(dtb)`。
     
@@ -1926,12 +2037,14 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
         
 2. **握手與接收 Size**
     
-    - 輸出 `OSDI: Ready` 與提示訊息。
+    - 輸出 `OSDI: Ready` 與提示訊息（`Bootloader: Waiting for Kernel size...`）。
         
-    - 透過 `uart_recv_uint()` 接收 Kernel Size，並回傳 Hex 確認。
+    - 透過 `uart_recv_uint()` 接收 Kernel Size，並用 `uart_send_hex()` 回送確認值。
         
 3. **接收 Kernel Image**
     
+    - 輸出提示訊息：`Bootloader: Waiting for Loding Kernel...`
+
     - 將接收到的 bytes 逐一寫入 `KERNEL_LOAD_ADDRESS`（0x80000）。
         
 4. **傳遞 DTB 並跳轉 (Handoff)**
@@ -1965,12 +2078,13 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 此檔案是 Kernel image 的主入口（`kernel_main(void *dtb_addr)`）：開機後先以 DTB 指標建立/解析裝置樹上下文（供後續 initrd / 硬體資訊使用），再初始化 UART、安裝例外向量表，最後進入 shell 互動迴圈。
 
 - **DTB 解析與上下文初始化**
+    - 程式碼最前段保留除錯鎖註解（`volatile int lock = 1; while(lock);`），需要時可取消註解用於 early boot 停住除錯。
   - 使用全域 `dtb_ctx` 作為 DTB 解析與狀態保存的 context。
   - `InitialDtbCtx(&dtb_ctx)`：初始化 context。
   - `ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx)`：解析 DTB blob，並透過 callback（`Initrd_Handler`）處理 DTB 內與 initrd 相關的節點/資訊（實際行為取決於 dtb/fdtb 模組實作）。
-  - 若解析失敗，目前分支為空（尚未做錯誤輸出/復原）。
+    - 若解析失敗（回傳 `false`），目前 `if` 分支為空（尚未做錯誤輸出/復原）。
 - **UART 與互動主迴圈**
-  - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
+    - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
     - 呼叫 `set_exception_vector_table()` 安裝 EL1 例外向量基底（使用 `exception_table.S` 內的 `exception_vector_table`）。
   - 輸出 `Welcome to OSDI`。
   - 呼叫 `shell_main()` 進入互動模式，接收使用者輸入並輸出結果。
@@ -2031,8 +2145,8 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 > **現況注意**：
 > 
 > 1. 程式碼中保留了 `volatile int lock = 1; while(lock);` 的除錯鎖（目前被註解掉），若需 GDB attach 除錯 startup 流程時可啟用。
->     
-> 2. 此階段已能透過 `dtb_ctx` 取得 Initramfs 的記憶體位置，但尚未將其掛載到檔案系統層，Shell 目前仍使用 header 定義的 `FILE_HEADER` 或是需修改 Shell 邏輯來使用 `dtb_ctx` 的值。
+> 
+> 2. Shell 的 `ls/cat`（以及 `test_user_mode`）目前已使用 `dtb_ctx.initrd_start` 作為 CPIO 起點；`cpio.h` 內的 `FILE_HEADER` 常數保留作為固定起點呼叫時可選的預設值。
 
 
 # 16. Python 傳輸腳本 (Python Serial Script)
@@ -2241,6 +2355,8 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     - `build/bootloader.img`（由 `bootloader_main.c` 連結而成）
         
     - `build/kernel8.img`（由 `kernel_main.c` 連結而成）
+
+- 自動從 `LabTest/` 來源產生並打包 `initramfs.cpio`（包含 `.S -> .o -> .bin` 的測試程式流程）
         
 - QEMU 以 `-kernel $(IMG_BOOT)`（現況為 `build/bootloader.img`）啟動，並以 `-initrd initramfs.cpio` 提供 initramfs
     
@@ -2330,12 +2446,28 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
         
     - `ELF_KERNEL := build/kernel8.elf`
         
-- `all`: 同時產出兩個 img
+- `all`: 同時產出 `build/bootloader.img`、`build/kernel8.img`、`initramfs.cpio`
     
-- `clean`: `rm -rf build`
+- `clean`：移除 `build/`、`LabTest` 生成檔（`.o/.bin` 等）與 `initramfs.cpio`
+
+#### 5) LabTest 與 initramfs 打包流程
+
+- `LABTEST_SRC_S/C/H`：收集 `LabTest` 下的 `.S/.c/.h`
+
+- `.S` 檔案流程：
+
+    - `LabTest/%.S -> LabTest/%.o`
+
+    - `LabTest/%.o -> LabTest/%.bin`（`objcopy -O binary`）
+
+- `LABTEST_PACK_FILES` 目前會優先打包 `.bin`（對 `.S` 來源），並包含其餘需要放入 initramfs 的測試檔
+
+- `$(INITRAMFS_IMG)` 規則：
+
+    - 在 `LabTest/` 目錄中以 `cpio -o -H newc` 產生 `../initramfs.cpio`
     
 
-#### 5) 連結與 objcopy（產出 .elf / .img）
+#### 6) 連結與 objcopy（產出 .elf / .img）
 
 - Bootloader：
     
@@ -2350,7 +2482,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 	- `objcopy -O binary build/kernel8.elf build/kernel8.img`
         
 
-#### 6) 編譯規則
+#### 7) 編譯規則
 
 - `CFile/%.c -> build/%.o`：使用 `$(CC) $(CFLAGS) -c`
     
@@ -2359,7 +2491,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 - `Assembly/%.s -> build/%.o`：使用 `$(CC) $(ASFLAGS) -c`
     
 
-#### 7) QEMU 執行目標
+#### 8) QEMU 執行目標
 
 - `qemu`：以 raspi3b 機器啟動，kernel 指向 `$(IMG_BOOT)`（`build/bootloader.img`），並掛載 initramfs 與 serial tcp：
     
@@ -2388,7 +2520,7 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
         
 - QEMU 的 `-kernel` 只載入 `$(IMG_BOOT)`（`build/bootloader.img`）；`build/kernel8.img` 的存在主要供 host 工具透過 UART 傳送，或供你在其他流程使用（Makefile 本身僅負責把它建出來）。
     
-- `-initrd initramfs.cpio` 固定使用該檔名；現況未提供自動生成/打包 initramfs 的目標（純使用既有檔案）。
+- `-initrd initramfs.cpio` 固定使用該檔名；現況 `make all` 會自動重建/打包此檔。
 
 # 18. 連結腳本 (Linker Scripts)
 ## `linker_boot.ld`

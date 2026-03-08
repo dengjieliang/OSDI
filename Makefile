@@ -74,12 +74,14 @@ LABTEST_SRC_H     := $(filter %.h,$(LABTEST_ALL_FILES))
 LABTEST_SRC_FILES := $(LABTEST_SRC_S) $(LABTEST_SRC_C) $(LABTEST_SRC_H)
 
 LABTEST_OBJ_S     := $(patsubst $(LABTEST_DIR)/%.S,$(LABTEST_DIR)/%.o,$(LABTEST_SRC_S))
+LABTEST_BIN_S     := $(patsubst $(LABTEST_DIR)/%.S,$(LABTEST_DIR)/%.bin,$(LABTEST_SRC_S))
 LABTEST_OBJ_C     := $(patsubst $(LABTEST_DIR)/%.c,$(LABTEST_DIR)/%_c.o,$(LABTEST_SRC_C))
 LABTEST_OBJ_H     := $(patsubst $(LABTEST_DIR)/%.h,$(LABTEST_DIR)/%_h.o,$(LABTEST_SRC_H))
 LABTEST_OBJ_FILES := $(LABTEST_OBJ_S) $(LABTEST_OBJ_C) $(LABTEST_OBJ_H)
+LABTEST_GEN_FILES := $(LABTEST_OBJ_FILES) $(LABTEST_BIN_S)
 
-LABTEST_OTHER_FILES := $(filter-out $(LABTEST_SRC_FILES) $(LABTEST_OBJ_FILES),$(LABTEST_ALL_FILES))
-LABTEST_PACK_FILES  := $(LABTEST_OBJ_FILES) $(LABTEST_OTHER_FILES)
+LABTEST_OTHER_FILES := $(filter-out $(LABTEST_SRC_FILES) $(LABTEST_GEN_FILES) $(LABTEST_DIR)/%.o $(LABTEST_DIR)/%.elf,$(LABTEST_ALL_FILES))
+LABTEST_PACK_FILES  := $(LABTEST_BIN_S) $(LABTEST_OBJ_C) $(LABTEST_OBJ_H) $(LABTEST_OTHER_FILES)
 
 .PHONY: all clean qemu qemu-gdb
 
@@ -111,6 +113,9 @@ $(ELF_KERNEL): $(OBJS_FOR_KERNEL) linker_kernel.ld | $(BUILD_DIR)
 $(LABTEST_DIR)/%.o: $(LABTEST_DIR)/%.S
 	$(CC) $(ASFLAGS) -c $< -o $@
 
+$(LABTEST_DIR)/%.bin: $(LABTEST_DIR)/%.o
+	$(OBJCOPY) -O binary $< $@
+
 $(LABTEST_DIR)/%_c.o: $(LABTEST_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -132,7 +137,7 @@ $(BUILD_DIR)/%.o: Assembly/%.s | $(BUILD_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(LABTEST_OBJ_FILES) $(INITRAMFS_IMG)
+	rm -f $(LABTEST_GEN_FILES) $(INITRAMFS_IMG)
 
 # ==========================================
 # 7. QEMU 執行設定
