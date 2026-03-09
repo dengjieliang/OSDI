@@ -11,6 +11,7 @@ void kernel_main(void* dtb_addr)
     // [新增] Kernel 的除錯鎖
     //volatile int lock = 1;
     //while(lock);
+    
 
     InitialDtbCtx(&dtb_ctx);
     if (ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx) == false)

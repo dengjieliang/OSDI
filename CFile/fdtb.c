@@ -1,5 +1,6 @@
 #include "../header/fdtb.h"
 #include "../header/utils.h"
+#include <string.h>
 
 bool PathEqualsBase(char** nodeStack, int depth, string_t* segments, int compareDepth)
 {
@@ -59,6 +60,12 @@ void InitialDtbCtx(CtxT* dtb_ctx)
     dtb_ctx->uart_mmio_base = 0;
     dtb_ctx->uart_mmio_size = 0;
     dtb_ctx->have_uart_reg = false;
+
+    dtb_ctx->arm_local_interrupt = 0;
+    dtb_ctx->have_arm_local_interrupt = false;
+
+    dtb_ctx->arm_ctrl_interrupt = 0;
+    dtb_ctx->have_arm_ctrl_interrupt = false;
     
     for (int i = 0; i < MAX_MEM_REGIONS; i++)
     {
@@ -134,5 +141,16 @@ void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
     {
         ctx_dtb->initrd_end = Decode_Initrd_Addr(valuePtr, valueLength);
         ctx_dtb->have_initrd_end = true;
+    }
+    else if (strcmp(nodeValueName, "brcm,bcm2836-l1-intc") == 0)
+    {
+        ctx_dtb->arm_local_interrupt = Decode_Initrd_Addr(valuePtr, valueLength);
+        ctx_dtb->have_arm_local_interrupt = true;
+    }
+    else if (strcmp(nodeValueName, "brcm,bcm2836-armctrl-intc") == 0)
+    {
+        ctx_dtb->arm_ctrl_interrupt = Decode_Initrd_Addr(valuePtr, valueLength);
+        ctx_dtb->arm_ctrl_interrupt = (ctx_dtb->arm_ctrl_interrupt & 0x00FFFFFF) | 0x3F000000; // set bit30 to indicate it's a arm ctrl interrupt
+        ctx_dtb->have_arm_ctrl_interrupt = true;
     }
 }

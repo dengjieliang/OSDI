@@ -1,7 +1,7 @@
 #include "../header/time.h"
+#include "../header/fdtb.h"
 #include "../header/uart.h"
 
-#define CORE0_TIMER_IRQ_CTRL 0x40000040
 static unsigned long long get_system_timer_count();
 static unsigned long long get_system_timer_frequency();
 static inline void core_timer_enable();
@@ -47,7 +47,8 @@ static inline void core_timer_enable()
 
 static inline void unmask_timer_interrupt()
 {
-    volatile unsigned int* timer_irq_ctrl = (unsigned int*)CORE0_TIMER_IRQ_CTRL;
+    extern CtxT dtb_ctx;
+    volatile unsigned int* timer_irq_ctrl = (unsigned int*)dtb_ctx.arm_local_interrupt; // 假設這是 timer interrupt controller 的 MMIO 位址，實際位址需根據你的平台調整
     *timer_irq_ctrl = 2; // unmask timer interrupt
 }
 

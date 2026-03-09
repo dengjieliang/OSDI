@@ -29,7 +29,7 @@ s_ALL := $(wildcard Assembly/*.s)
 
 # 3. 分離 "共用檔"
 # 技巧：直接把上面定義的 main 檔案過濾掉，剩下的就是 uart.c, utils.c 等
-C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) $(C_EXCEPTION_SRC) CFile/shell.c, $(C_ALL))
+C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) $(C_EXCEPTION_SRC) CFile/shell.c CFile/time.c, $(C_ALL))
 
 # ==========================================
 # 4. 定義 Object 檔案 (.o)
@@ -37,12 +37,14 @@ C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) $(C_EXCEPTION_SRC) CFile/
 # 轉換共用 C 檔 -> .o
 OBJ_COMMON_C := $(patsubst CFile/%.c, $(BUILD_DIR)/%.o, $(C_COMMON))
 
-# 轉換 Assembly 檔 (排除 boot.S，因為它要放第一個) -> .o
-OBJ_ASM := $(patsubst Assembly/%.S, $(BUILD_DIR)/%.o, $(filter-out Assembly/boot.S, $(S_ALL))) \
-           $(patsubst Assembly/%.s, $(BUILD_DIR)/%.o, $(s_ALL))
+# 轉換 Assembly 檔
+OBJ_ASM_COMMON := $(patsubst Assembly/%.S, $(BUILD_DIR)/%.o, $(filter-out Assembly/boot.S Assembly/exception_table.S Assembly/user_mode_entry.S, $(S_ALL))) \
+				  $(patsubst Assembly/%.s, $(BUILD_DIR)/%.o, $(s_ALL))
+
+OBJ_ASM_KERNEL := $(BUILD_DIR)/exception_table.o $(BUILD_DIR)/user_mode_entry.o
 
 # 組合共用 Object 清單
-OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM)
+OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM_COMMON)
 
 # 設定 Entry Point Object (boot.o 必須在最前面)
 BOOT_START_OBJ := $(BUILD_DIR)/boot.o
@@ -50,10 +52,10 @@ EXCEPTION_C_OBJ := $(BUILD_DIR)/exception.o
 
 # ==== 定義最終兩組 Object 清單 (關鍵修正) ====
 # Bootloader = boot.o + 共用.o + bootloader_main.o
-OBJS_FOR_BOOTLOADER := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(EXCEPTION_C_OBJ) $(BUILD_DIR)/bootloader_main.o
+OBJS_FOR_BOOTLOADER := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/bootloader_main.o
 
 # Kernel = boot.o + 共用.o + kernel_main.o
-OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(EXCEPTION_C_OBJ) $(BUILD_DIR)/shell.o $(BUILD_DIR)/kernel_main.o
+OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(OBJ_ASM_KERNEL) $(EXCEPTION_C_OBJ) $(BUILD_DIR)/time.o $(BUILD_DIR)/shell.o $(BUILD_DIR)/kernel_main.o
 
 # ==========================================
 # 5. 定義輸出檔名

@@ -13,6 +13,7 @@ void uart_send_hex(unsigned int number);
 unsigned int uart_recv_uint();
 char uart_recv();
 void uart_puts(const char *s);
+void uart_interrupt_handler();
 void delay_cycles(unsigned int time);
 
 #endif

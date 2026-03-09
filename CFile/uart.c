@@ -262,6 +262,11 @@ void uart_puts(const char *s)
     }
 }
 
+void uart_interrupt_handler()
+{
+    
+}
+
 void delay_cycles(unsigned int time)
 {
     for (unsigned int i = 0; i < time; i++)

@@ -41,6 +41,13 @@ typedef struct ctx
     unsigned int uart_mmio_size;
     bool have_uart_reg;
 
+    unsigned long arm_local_interrupt;
+    bool have_arm_local_interrupt;
+
+    unsigned long arm_ctrl_interrupt;
+    bool have_arm_ctrl_interrupt;
+
+
     //記錄 RAM 的實體範圍
     MemRegionT mem_regions[MAX_MEM_REGIONS];
 
