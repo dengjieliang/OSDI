@@ -23,6 +23,8 @@
 //清空FIFO，這個暫存器讀出來的數值為中斷狀態。但寫進去的數值(只有第1、2bit可寫其他為READ-ONLY或Reserved Bits)
 //代表是否清空FIFObit 1 = 1 → 清 RX FIFO，bit 2 = 1 → 清 TX FIFO
 #define AUX_CLEAR_TX_RX_FIFO 0x06
+#define AUX_MU_IIR_INT_RX 0X04 // bit 2 = 1 → RX FIFO 中有資料可讀
+#define AUX_MU_IIR_INT_TX 0X02 // bit 1 = 1 → TX FIFO 可寫
 #define AUX_TX_FIFO_EMPTY (1 << 5) // 或 0x20，表示 TX FIFO 為空，可以寫入資料
 #define AUX_RX_FIFO_EMPTY 0X01 // 表示 RX FIFO 為空，沒有資料可讀
 #define AUX_CHAR_MASK 0xFF // 只取資料的低 8 bits讀取為CHAR傳回給CPU
@@ -38,6 +40,15 @@
 
 #define GPFSEL1_CLEAR_VALUE ~(63 << 12) // 清除 GPFSEL1 的 GPIO14、GPIO15 設定
 #define GPFSEL1_ALT5_GPIO14_15 (18 << 12) // 設定 GPIO14、GPIO15 為 ALT5 (mini UART)
+
+#define MAX_BUFFER_SIZE 1024
+static char rx_buffer[MAX_BUFFER_SIZE];
+static int rx_head = 0;
+static int rx_tail = 0;
+
+static char tx_buffer[MAX_BUFFER_SIZE];
+static int tx_head = 0;
+static int tx_tail = 0;
 
 void uart_init()
 {
@@ -264,7 +275,54 @@ void uart_puts(const char *s)
 
 void uart_interrupt_handler()
 {
-    
+    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
+
+    if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_RX)
+    {
+        unsigned int read_byte = mmio_read(AUX_MU_IO_REG);
+        read_byte = read_byte & AUX_CHAR_MASK; // 只取資料的低 8 bits
+        char c = (char)read_byte;
+        rx_buffer[rx_tail] = c;
+        rx_tail = (rx_tail + 1) % MAX_BUFFER_SIZE;
+    }
+    else if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
+    {
+        if (tx_head != tx_tail)
+        {
+            char c = tx_buffer[tx_head];
+            tx_head = (tx_head + 1) % MAX_BUFFER_SIZE;
+            mmio_write(AUX_MU_IO_REG, c);
+        }
+        else
+        {
+            iir &= ~AUX_MU_IIR_INT_TX; // 清除 TX 中斷狀態，避免重複觸發
+            mmio_write(AUX_MU_IIR_REG, iir);
+        }
+    }
+}
+
+char async_uart_recv()
+{
+    while (rx_head == rx_tail)
+    {
+        asm volatile("nop");
+    }
+
+    char c = rx_buffer[rx_head];
+    rx_head = (rx_head + 1) % MAX_BUFFER_SIZE;
+    return c;
+}
+
+void async_uart_send(char c)
+{
+    tx_buffer[tx_tail] = c;
+    tx_tail = (tx_tail + 1) % MAX_BUFFER_SIZE;
+
+    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
+    iir |= AUX_MU_IIR_INT_TX;
+    mmio_write(AUX_MU_IIR_REG, iir);
+
+    return;
 }
 
 void delay_cycles(unsigned int time)
