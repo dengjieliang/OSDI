@@ -59,9 +59,9 @@ void get_timetick()
     int timetick_integer_part = timer_count / timer_freq;
     int decimal_part = ((timer_count % timer_freq) * 10000) / timer_freq;
     
-    uart_send_integer(timetick_integer_part);
-    uart_send('.');
-    uart_send_decimal_part(decimal_part, 4);
+    async_uart_send_integer(timetick_integer_part);
+    async_uart_send('.');
+    async_uart_send_decimal_part(decimal_part, 4);
 }
 
 void set_core_timer_interrupt_tick(unsigned long long timer_count)

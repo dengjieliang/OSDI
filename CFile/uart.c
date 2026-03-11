@@ -115,6 +115,37 @@ void uart_init()
     mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
 }
 
+void uart_interrupt_handler()
+{
+    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
+
+    if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_RX)
+    {
+        //讀入字元
+        unsigned int read_byte = mmio_read(AUX_MU_IO_REG);
+        read_byte = read_byte & AUX_CHAR_MASK; // 只取資料的低 8 bits
+        char c = (char)read_byte;
+        rx_buffer[rx_tail] = c;
+        rx_tail = (rx_tail + 1) % MAX_BUFFER_SIZE;
+    }
+    else if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
+    {
+        //寫出至螢幕
+        if (tx_head != tx_tail)
+        {
+            char c = tx_buffer[tx_head];
+            tx_head = (tx_head + 1) % MAX_BUFFER_SIZE;
+            mmio_write(AUX_MU_IO_REG, c);
+        }
+        else
+        {
+            // 寫出時是寫出完成觸發中斷，因此若無東西可寫需清除 TX 中斷狀態，避免重複觸發
+            iir &= ~AUX_MU_IIR_INT_TX; 
+            mmio_write(AUX_MU_IIR_REG, iir);
+        }
+    }
+}
+
 void uart_send(char c)
 {
     //bit 5: TX 可寫
@@ -124,6 +155,45 @@ void uart_send(char c)
     }
     //寫入資料
     mmio_write(AUX_MU_IO_REG, c);
+}
+
+void uart_puts(const char *s)
+{
+    while (*s != '\0')
+    {
+        //換行字元前先加上回車字元
+        if (*s == '\n')
+        {
+            uart_send('\r');
+        }
+
+        uart_send(*s++);
+    }
+}
+
+char uart_recv()
+{
+    while ((mmio_read(AUX_MU_LSR_REG) & AUX_RX_FIFO_EMPTY) == 0)
+    {
+        asm volatile("nop");
+    }
+
+    //讀取字元資料只取低 8 bits
+    return (char)(mmio_read(AUX_MU_IO_REG) & AUX_CHAR_MASK);
+}
+
+unsigned int uart_recv_uint()
+{
+    unsigned int size = 0;
+
+    //因為python是Little Endian
+    for (int i = 0; i < 4; i++)
+    {
+        char tmp = uart_recv();
+        size |= (((unsigned char)tmp) << i * 8);
+    }
+
+    return size;
 }
 
 void uart_send_integer(int number)
@@ -234,70 +304,29 @@ void uart_send_hex(unsigned int number)
     uart_puts("\n");
 }
 
-unsigned int uart_recv_uint()
+void async_uart_send(char c)
 {
-    unsigned int size = 0;
+    tx_buffer[tx_tail] = c;
+    tx_tail = (tx_tail + 1) % MAX_BUFFER_SIZE;
 
-    //因為python是Little Endian
-    for (int i = 0; i < 4; i++)
-    {
-        char tmp = uart_recv();
-        size |= (((unsigned char)tmp) << i * 8);
-    }
+    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
+    iir |= AUX_MU_IIR_INT_TX;
+    mmio_write(AUX_MU_IIR_REG, iir);
 
-    return size;
+    return;
 }
 
-char uart_recv()
-{
-    while ((mmio_read(AUX_MU_LSR_REG) & AUX_RX_FIFO_EMPTY) == 0)
-    {
-        asm volatile("nop");
-    }
-
-    //讀取字元資料只取低 8 bits
-    return (char)(mmio_read(AUX_MU_IO_REG) & AUX_CHAR_MASK);
-}
-
-void uart_puts(const char *s)
+void async_uart_puts(const char *s)
 {
     while (*s != '\0')
     {
         //換行字元前先加上回車字元
         if (*s == '\n')
         {
-            uart_send('\r');
+            async_uart_send('\r');
         }
 
-        uart_send(*s++);
-    }
-}
-
-void uart_interrupt_handler()
-{
-    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
-
-    if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_RX)
-    {
-        unsigned int read_byte = mmio_read(AUX_MU_IO_REG);
-        read_byte = read_byte & AUX_CHAR_MASK; // 只取資料的低 8 bits
-        char c = (char)read_byte;
-        rx_buffer[rx_tail] = c;
-        rx_tail = (rx_tail + 1) % MAX_BUFFER_SIZE;
-    }
-    else if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
-    {
-        if (tx_head != tx_tail)
-        {
-            char c = tx_buffer[tx_head];
-            tx_head = (tx_head + 1) % MAX_BUFFER_SIZE;
-            mmio_write(AUX_MU_IO_REG, c);
-        }
-        else
-        {
-            iir &= ~AUX_MU_IIR_INT_TX; // 清除 TX 中斷狀態，避免重複觸發
-            mmio_write(AUX_MU_IIR_REG, iir);
-        }
+        async_uart_send(*s++);
     }
 }
 
@@ -313,16 +342,126 @@ char async_uart_recv()
     return c;
 }
 
-void async_uart_send(char c)
+unsigned int async_uart_recv_uint()
 {
-    tx_buffer[tx_tail] = c;
-    tx_tail = (tx_tail + 1) % MAX_BUFFER_SIZE;
+    unsigned int size = 0;
 
-    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
-    iir |= AUX_MU_IIR_INT_TX;
-    mmio_write(AUX_MU_IIR_REG, iir);
+    //因為python是Little Endian
+    for (int i = 0; i < 4; i++)
+    {
+        char tmp = async_uart_recv();
+        size |= (((unsigned char)tmp) << i * 8);
+    }
 
-    return;
+    return size;
+}
+
+void async_uart_send_integer(int number)
+{
+    if (number == 0)
+    {
+        async_uart_send('0');
+        return;
+    }
+
+    if (number < 0)
+    {
+        async_uart_send('-');
+        number = -number;
+    }
+
+    char buffer[100];
+    unsigned int digit_size = 0;
+
+    while(number > 0)
+    {
+        buffer[digit_size] = (number % 10) + '0';
+        number /= 10;
+        digit_size += 1;
+    }
+
+    for (int i = digit_size - 1; i >= 0; i--)
+    {
+        async_uart_send(buffer[i]);
+    }
+}
+
+void async_uart_send_unsigned_long_integer(unsigned long number)
+{
+    if (number == 0)
+    {
+        async_uart_send('0');
+        return;
+    }
+
+    if (number < 0)
+    {
+        async_uart_send('-');
+        number = -number;
+    }
+
+    char buffer[100];
+    unsigned int digit_size = 0;
+
+    while(number > 0)
+    {
+        buffer[digit_size] = (number % 10) + '0';
+        number /= 10;
+        digit_size += 1;
+    }
+
+    for (int i = digit_size - 1; i >= 0; i--)
+    {
+        async_uart_send(buffer[i]);
+    }
+}
+
+void async_uart_send_decimal_part(int number, unsigned int digit_size)
+{
+    char buffer[100];
+    unsigned int has_number_size = 0;
+
+    while(number > 0)
+    {
+        buffer[has_number_size] = (number % 10) + '0';
+        number /= 10;
+        has_number_size += 1;
+    }
+
+    while (has_number_size < digit_size)
+    {
+        buffer[has_number_size] = '0';
+        has_number_size += 1;
+    }
+
+    for (int i = has_number_size - 1; i >= 0; i--)
+    {
+        async_uart_send(buffer[i]);
+    }
+}
+
+void async_uart_send_hex(unsigned int number)
+{
+    for (int hex_section = 28; hex_section >= 0; hex_section -= 4)
+    {
+        unsigned int hex_number = number & (0xF << hex_section);
+        hex_number = (hex_number >> hex_section);
+        char output;
+
+        if (hex_number >= 10)
+        {
+            output = 'A';
+            output = output + (hex_number - 10);
+        }
+        else
+        {
+            output = hex_number + '0';
+        }
+
+        async_uart_send(output);
+    }
+
+    async_uart_puts("\n");
 }
 
 void delay_cycles(unsigned int time)

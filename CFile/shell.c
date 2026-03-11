@@ -69,20 +69,20 @@ char* shell_input_line()
 {
     int buffer_index = 0;
     
-    uart_puts("[");
+    async_uart_puts("[");
     get_timetick();
-    uart_puts("]");
-    uart_puts(":");
-    uart_puts("shell$ ");
+    async_uart_puts("]");
+    async_uart_puts(":");
+    async_uart_puts("shell$ ");
     
 
     while (true)
     {
-        char c = uart_recv();
+        char c = async_uart_recv();
         
         if (c == '\r' || c == '\n') // Handle Enter key
         {
-            uart_puts("\n");
+            async_uart_puts("\n");
             input_buffer[buffer_index] = '\0'; // Null-terminate the string
             return input_buffer;
         }
@@ -92,12 +92,12 @@ char* shell_input_line()
             {
                 buffer_index--;
                 // 回顯退格
-                uart_puts("\b \b");
+                async_uart_puts("\b \b");
             }
             continue;
         }
         // 回顯輸入的字元
-        uart_send(c);
+        async_uart_send(c);
 
         // 儲存到緩衝區
         if (buffer_index < sizeof(input_buffer) - 1)
@@ -123,7 +123,7 @@ static void split_command(int* argc, char* argv[])
 
         if (*argc >= MAX_ARGS)
         {
-            uart_puts("Warning: Too many arguments, ignoring the rest.\n");
+            async_uart_puts("Warning: Too many arguments, ignoring the rest.\n");
             break;
         }
 
@@ -144,7 +144,7 @@ void execute_command(int argc, char* argv[])
     {
         if (reboot_lock && strcmp("cancelReboot", argv[0]) != 0)
         {
-            uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
+            async_uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
             return;
         }
 
@@ -156,10 +156,10 @@ void execute_command(int argc, char* argv[])
     }
 
     const char *not_found_command_msg = "Command not found:";
-    uart_puts("\n");
-    uart_puts(not_found_command_msg);
-    uart_puts(argv[0]);
-    uart_puts("\n");
+    async_uart_puts("\n");
+    async_uart_puts(not_found_command_msg);
+    async_uart_puts(argv[0]);
+    async_uart_puts("\n");
 }
 
 static void cmd_hello(int argc, char* argv[])
@@ -168,7 +168,7 @@ static void cmd_hello(int argc, char* argv[])
     (void)argv; // 防止編譯警告
 
     const char *hello_text = "Hello, World!\n";
-    uart_puts(hello_text);
+    async_uart_puts(hello_text);
 }
 
 static void cmd_help(int argc, char* argv[])
@@ -177,15 +177,15 @@ static void cmd_help(int argc, char* argv[])
     (void)argv; // 防止編譯警告
 
     const char *hint_text = "Available commands:\n";
-    uart_puts(hint_text);
+    async_uart_puts(hint_text);
 
     for (int i = 0; commands[i].name != NULL; i++)
     {
-        uart_puts(" - ");
-        uart_puts(commands[i].name);
-        uart_puts(":");
-        uart_puts(commands[i].description);
-        uart_puts("\n");
+        async_uart_puts(" - ");
+        async_uart_puts(commands[i].name);
+        async_uart_puts(":");
+        async_uart_puts(commands[i].description);
+        async_uart_puts("\n");
     }
 }
 
@@ -202,8 +202,8 @@ static void cmd_board_info(int argc, char* argv[])
 
     if (get_board_status() == 0x80000000)
     {
-        uart_puts("Board Revision: ");
-        uart_send_hex(get_board_revision());
+        async_uart_puts("Board Revision: ");
+        async_uart_send_hex(get_board_revision());
     }
 
     prepare_memory_request();
@@ -211,8 +211,8 @@ static void cmd_board_info(int argc, char* argv[])
 
     if (get_memory_status() == 0x80000000)
     {
-        uart_puts("Memory Size is: ");
-        uart_send_hex(get_memory_size());
+        async_uart_puts("Memory Size is: ");
+        async_uart_send_hex(get_memory_size());
     }
 }
 
@@ -222,7 +222,7 @@ static void cmd_get_timer(int argc, char* argv[])
     (void)argv; // 防止編譯警告
 
     get_timetick();
-    uart_puts("\n");
+    async_uart_puts("\n");
 }
 
 static void cmd_reboot(int argc, char* argv[])
@@ -231,7 +231,7 @@ static void cmd_reboot(int argc, char* argv[])
     (void)argv; // 防止編譯警告
 
     // --- 新增這行 ---
-    uart_puts("Rebooting in T-minus 2 seconds...\n"); //reboot前跳提示
+    async_uart_puts("Rebooting in T-minus 2 seconds...\n"); //reboot前跳提示
     // ----------------
     reset(150000);
     reboot_lock = true;
@@ -257,7 +257,7 @@ static void cmd_get_file_header(int argc, char* argv[])
 
     if (file_count <= 0)
     {
-        uart_puts("Not Find Any File.");
+        async_uart_puts("Not Find Any File.");
     }
 }
 
@@ -265,12 +265,12 @@ static void cmd_get_file_context(int argc, char* argv[])
 {
     if (argc < 2)
     {
-        uart_puts("Please Enter FileName");
+        async_uart_puts("Please Enter FileName");
         return;
     }
     else if (argc != 2)
     {
-        uart_puts("False Argument");
+        async_uart_puts("False Argument");
         return;
     }
 
@@ -281,37 +281,37 @@ static void cmd_get_file_context(int argc, char* argv[])
 
     if (find_context_result == false)
     {
-        uart_puts("Cannot Find File");
+        async_uart_puts("Cannot Find File");
         return;
     }
 }
 
 static void cmd_test_el1_brk(int argc, char* argv[]) 
 {
-    uart_puts("[TEST] EL1 BRK -> expect default_handler dump then hang\r\n");
+    async_uart_puts("[TEST] EL1 BRK -> expect default_handler dump then hang\r\n");
     asm volatile ("brk #0");
-    uart_puts("[TEST] should not reach here\r\n");
+    async_uart_puts("[TEST] should not reach here\r\n");
 }
 
 static void cmd_test_el1_svc(int argc, char* argv[]) 
 {
-    uart_puts("[TEST] EL1 SVC -> expect current-EL sync vector (default_handler) then hang\r\n");
+    async_uart_puts("[TEST] EL1 SVC -> expect current-EL sync vector (default_handler) then hang\r\n");
     asm volatile ("svc #0");
-    uart_puts("[TEST] should not reach here\r\n");
+    async_uart_puts("[TEST] should not reach here\r\n");
 }
 
 static void cmd_test_el1_bad_read(int argc, char* argv[]) 
 {
-    uart_puts("[TEST] EL1 bad read -> expect data abort dump then hang\r\n");
+    async_uart_puts("[TEST] EL1 bad read -> expect data abort dump then hang\r\n");
     volatile unsigned long *p = (unsigned long *)0xFFFFFFFFFFFF0000UL; // 依你的平台可換更明顯無效位址
     volatile unsigned long v = *p;
     (void)v;
-    uart_puts("[TEST] should not reach here\r\n");
+    async_uart_puts("[TEST] should not reach here\r\n");
 }
 
 static void cmd_test_el0_user_mode(int argc, char* argv[])
 {
-    uart_puts("[TEST] EL0 user mode -> expect switch to EL0 then print user mode message\r\n");
+    async_uart_puts("[TEST] EL0 user mode -> expect switch to EL0 then print user mode message\r\n");
     void* user_start_addr = 0;; // 依你的平台可換更明顯的EL0程式位址
     unsigned long user_size = 0;
 
@@ -323,7 +323,7 @@ static void cmd_test_el0_user_mode(int argc, char* argv[])
 
     if (get_file_data_success == false)
     {
-        uart_puts("Cannot Find File");
+        async_uart_puts("Cannot Find File");
         return;
     }
     else
@@ -333,6 +333,6 @@ static void cmd_test_el0_user_mode(int argc, char* argv[])
         unsigned long user_stack_top = (unsigned long)(user_stack + sizeof(user_stack));
         enter_el0((unsigned long)user_start_addr, user_stack_top);
     }
-    uart_puts("[TEST] should not reach here\r\n");
+    async_uart_puts("[TEST] should not reach here\r\n");
 
 }
