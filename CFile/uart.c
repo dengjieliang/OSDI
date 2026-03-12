@@ -28,7 +28,7 @@
 #define AUX_TX_FIFO_EMPTY (1 << 5) // 或 0x20，表示 TX FIFO 為空，可以寫入資料
 #define AUX_RX_FIFO_EMPTY 0X01 // 表示 RX FIFO 為空，沒有資料可讀
 #define AUX_MU_IER_RX_ENABLE 0X01 // Bit 0
-#define AUX_MU_IER_TX_ENABLE 0X10 // Bit 1
+#define AUX_MU_IER_TX_ENABLE 0X02 // Bit 1
 #define AUX_CHAR_MASK 0xFF // 只取資料的低 8 bits讀取為CHAR傳回給CPU
 #define AUX_MINI_UART_DATA_TYPE 3 // 8-bit data
 #define AUX_BAUD_RATE_115200 270 // 設定傳送速度為 115200 baud rate
@@ -115,6 +115,11 @@ void uart_init()
     aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
     aux_mu_cntl_reg |= AUX_TX_RX_ENABLE_MASK;
     mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
+
+    //重新開啟中斷
+    unsigned int ier = mmio_read(AUX_MU_IER_REG);
+    ier |= AUX_MU_IER_RX_ENABLE; // 0x01
+    mmio_write(AUX_MU_IER_REG, ier);
 }
 
 void uart_interrupt_handler()
