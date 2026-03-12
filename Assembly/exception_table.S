@@ -9,9 +9,12 @@
     .type   el0_sync_entry, %function
     .global el0_irq_entry
     .type   el0_irq_entry, %function
+    .global el1_irq_entry
+    .type   el1_irq_entry, %function
     .extern el0_sync_handler_c
     .extern el0_irq_handler_c
     .extern default_handler_dump_c
+    .extern el1_irq_handler_c
     .globl set_exception_vector_table
     .type set_exception_vector_table, %function
 
@@ -73,7 +76,7 @@ exception_vector_table:
     b default_handler
     .align 7
     /*0x280: IRQ*/
-    b default_handler
+    b el1_irq_entry
     .align 7
     /*0x300: FIQ*/
     b default_handler
@@ -158,6 +161,22 @@ el0_irq_entry:
     mov x2, sp
 
     bl  el0_irq_handler_c
+    RESTORE_ALL
+    eret
+
+el1_irq_entry:
+    SAVE_ALL
+
+    /*x0 = ELR_EL1 (return address / faulting PC)*/
+    mrs x0, elr_el1
+
+    /*x1 = SPSR_EL1 (saved PSTATE)*/
+    mrs x1, spsr_el1
+
+    /*x2 = pass pointer to saved GPR context*/
+    mov x2, sp
+    bl  el1_irq_handler_c
+
     RESTORE_ALL
     eret
 
