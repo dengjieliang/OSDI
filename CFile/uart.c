@@ -112,7 +112,7 @@ void uart_init()
     mmio_write(GPFSEL1, gpfsel1);
 }
 
-void aux_mu_cntl_reg()
+void uart_aux_mu_cntl_reg()
 {
     unsigned int aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
     aux_mu_cntl_reg |= AUX_TX_RX_ENABLE_MASK;

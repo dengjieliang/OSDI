@@ -21,11 +21,14 @@ void kernel_main(void* dtb_addr)
 
     // 第二次初始化，雖然硬體已經開了，但為了保險，重新設定一次
     uart_init();
+    uart_aux_mu_cntl_reg();
+    uart_open_ier_reg();
+
 
     // 會直接吃.S檔案內的 exception_vector_table
     set_exception_vector_table();
 
-    uart_puts("\r\nWelcome to OSDI\r\n");
+    async_uart_puts("\r\nWelcome to OSDI\r\n");
     
     //獲取使用者輸入
     shell_main();

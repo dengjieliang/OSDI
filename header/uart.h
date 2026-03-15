@@ -3,7 +3,7 @@
 
 //initializes mini UART
 void uart_init();
-void aux_mu_cntl_reg();
+void uart_aux_mu_cntl_reg();
 void uart_open_ier_reg();
 void uart_interrupt_handler();
 
