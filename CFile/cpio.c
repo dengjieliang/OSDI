@@ -57,9 +57,11 @@ int CpioGetFilesHeaderName(void *file_header)
         
         for (int i = 0; i < file_name_size - 1; i++)
         {
-            uart_send(*((char*)filename_ptr));
+            async_uart_send(*((char*)filename_ptr));
             filename_ptr += 1;
         }
+
+        async_uart_puts("\n");
 
         file_count += 1;
         file_header = GetNextHeader(file_header);

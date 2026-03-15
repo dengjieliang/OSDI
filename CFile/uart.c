@@ -13,7 +13,7 @@
 #define AUX_MU_CNTL_REG (AUX_BASE + 0x60)   //啟用/關閉 TX/RX
 #define AUX_MU_STAT_REG (AUX_BASE + 0x64)   //存更多狀態資訊，很多人實作時只用 LSR 也行。也可以從這裡看 FIFO 狀態。
 #define AUX_MU_BAUD_REG (AUX_BASE + 0x68)   //baud rate
-#define AUX_MU_IRQS_REG (AUX_BASE + 0xB210)   //第二層中斷控制器
+#define IRQ_ENABLE1    (MMIO_BASE + 0xB210)   // interrupt controller Enable IRQs 1
 
 #define AUX_ENABLES_MASK (1)    //啟用 mini UART 的位元遮罩
 #define AUX_TX_RX_DISABLE_MASK ~(3) // 關閉 TX/RX 的位元遮罩
@@ -127,9 +127,9 @@ void uart_open_ier_reg()
     mmio_write(AUX_MU_IER_REG, ier);
 
     // [新增] 啟用第二層中斷控制器的 AUX IRQ (Bit 29)
-    unsigned int enable_irq1 = mmio_read(AUX_MU_IRQS_REG);
+    unsigned int enable_irq1 = mmio_read(IRQ_ENABLE1);
     enable_irq1 |= (1 << 29);
-    mmio_write(AUX_MU_IRQS_REG, enable_irq1);
+    mmio_write(IRQ_ENABLE1, enable_irq1);
 }
 
 void uart_interrupt_handler()
@@ -145,7 +145,8 @@ void uart_interrupt_handler()
         rx_buffer[rx_tail] = c;
         rx_tail = (rx_tail + 1) % MAX_BUFFER_SIZE;
     }
-    else if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
+    
+    if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
     {
         //寫出至螢幕
         if (tx_head != tx_tail)
@@ -324,12 +325,24 @@ void uart_send_hex(unsigned int number)
 
 void async_uart_send(char c)
 {
+    bool queue_was_empty = (tx_head == tx_tail);
+
     tx_buffer[tx_tail] = c;
     tx_tail = (tx_tail + 1) % MAX_BUFFER_SIZE;
 
-    unsigned int ier = mmio_read(AUX_MU_IER_REG);
-    ier |= AUX_MU_IER_TX_ENABLE;
-    mmio_write(AUX_MU_IER_REG, ier);
+    if (queue_was_empty && (mmio_read(AUX_MU_LSR_REG) & AUX_TX_FIFO_EMPTY))
+    {
+        char first_byte = tx_buffer[tx_head];
+        tx_head = (tx_head + 1) % MAX_BUFFER_SIZE;
+        mmio_write(AUX_MU_IO_REG, first_byte);
+    }
+
+    if (tx_head != tx_tail)
+    {
+        unsigned int ier = mmio_read(AUX_MU_IER_REG);
+        ier |= AUX_MU_IER_TX_ENABLE;
+        mmio_write(AUX_MU_IER_REG, ier);
+    }
 
     return;
 }

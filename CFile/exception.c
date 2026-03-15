@@ -36,17 +36,14 @@ static inline unsigned long read_far_el1(void)
 static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ctx)
 {
     // IRQ 進來時，多半是 timer/uart/其他 device
-    mask_all_exceptions(); // 可選：避免印訊息時 nested
-
-    async_uart_puts("\n[EL0 IRQ]\n");
-    async_uart_puts("  ELR_EL1  = 0x"); 
-    async_uart_send_unsigned_long_integer(elr);  
-    async_uart_puts("\n");
-    async_uart_puts("  SPSR_EL1 = 0x"); 
-    async_uart_send_unsigned_long_integer(spsr); 
-    async_uart_puts("\n");
+    mask_all_exceptions(); // 避免 nested interrupt
 
     extern CtxT dtb_ctx;
+
+    if (dtb_ctx.interrupt_info.have_arm_local_intc_base == false)
+    {
+        return;
+    }
 
     // 讀取 Core 0 Interrupt Source
     unsigned int irq_src = *((volatile unsigned int*)(dtb_ctx.interrupt_info.arm_local_intc_base + 0x60));
@@ -54,15 +51,20 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
     // Bit 1 (值為 2) 代表 CNTPNSIRQ (Core Timer Interrupt)
     if (irq_src & (1 << 1))
     {
-        async_uart_puts("Core Timer Interrupt! Time: ");
+        uart_puts("Core Timer Interrupt! Time: ");
         get_timetick(); // 印出目前秒數
-        async_uart_puts("\n");
+        uart_puts("\n");
 
         // Exercise 2 規定：下次 timeout 設為 2 秒後
         set_core_timer_interrupt_second(2);
     }
     else if (irq_src & (1 << 8))
     {
+        if (dtb_ctx.interrupt_info.have_arm_ctrl_intc_base == false)
+        {
+            return;
+        }
+
         unsigned int uart_irq_pending = *((volatile unsigned int*)(dtb_ctx.interrupt_info.arm_ctrl_intc_base + 0x04));
         // 判斷是否為 AUX 中斷 (Bit 29)
         if (uart_irq_pending & (1 << 29))
@@ -73,9 +75,9 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
     else
     {
         // 處理未知的中斷
-        async_uart_puts("\n[EL0 IRQ] Unknown IRQ source: 0x");
-        async_uart_send_hex(irq_src);
-        async_uart_puts("\n");
+        uart_puts("\n[IRQ] Unknown IRQ source: 0x");
+        uart_send_hex(irq_src);
+        uart_puts("\n");
     }
     return;
 }
