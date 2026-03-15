@@ -52,7 +52,7 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
     unsigned int irq_src = *((volatile unsigned int*)(dtb_ctx.interrupt_info.arm_local_intc_base + 0x60));
 
     // Bit 1 (值為 2) 代表 CNTPNSIRQ (Core Timer Interrupt)
-    if (irq_src == 2)
+    if (irq_src & (1 << 1))
     {
         async_uart_puts("Core Timer Interrupt! Time: ");
         get_timetick(); // 印出目前秒數
@@ -61,7 +61,7 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
         // Exercise 2 規定：下次 timeout 設為 2 秒後
         set_core_timer_interrupt_second(2);
     }
-    else if (irq_src == (1 << 8))
+    else if (irq_src & (1 << 8))
     {
         unsigned int uart_irq_pending = *((volatile unsigned int*)(dtb_ctx.interrupt_info.arm_ctrl_intc_base + 0x04));
         // 判斷是否為 AUX 中斷 (Bit 29)
