@@ -13,6 +13,7 @@
 #define AUX_MU_CNTL_REG (AUX_BASE + 0x60)   //啟用/關閉 TX/RX
 #define AUX_MU_STAT_REG (AUX_BASE + 0x64)   //存更多狀態資訊，很多人實作時只用 LSR 也行。也可以從這裡看 FIFO 狀態。
 #define AUX_MU_BAUD_REG (AUX_BASE + 0x68)   //baud rate
+#define AUX_MU_IRQS_REG (AUX_BASE + 0xB210)   //第二層中斷控制器
 
 #define AUX_ENABLES_MASK (1)    //啟用 mini UART 的位元遮罩
 #define AUX_TX_RX_DISABLE_MASK ~(3) // 關閉 TX/RX 的位元遮罩
@@ -124,6 +125,11 @@ void uart_open_ier_reg()
     unsigned int ier = mmio_read(AUX_MU_IER_REG);
     ier |= AUX_MU_IER_RX_ENABLE; // 0x01
     mmio_write(AUX_MU_IER_REG, ier);
+
+    // [新增] 啟用第二層中斷控制器的 AUX IRQ (Bit 29)
+    unsigned int enable_irq1 = mmio_read(AUX_MU_IRQS_REG);
+    enable_irq1 |= (1 << 29);
+    mmio_write(AUX_MU_IRQS_REG, enable_irq1);
 }
 
 void uart_interrupt_handler()

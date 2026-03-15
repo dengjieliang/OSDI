@@ -28,6 +28,8 @@ void kernel_main(void* dtb_addr)
     // 會直接吃.S檔案內的 exception_vector_table
     set_exception_vector_table();
 
+    asm volatile("msr daifclr, #0xf");
+
     async_uart_puts("\r\nWelcome to OSDI\r\n");
     
     //獲取使用者輸入
