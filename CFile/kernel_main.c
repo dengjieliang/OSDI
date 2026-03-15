@@ -14,7 +14,7 @@ void kernel_main(void* dtb_addr)
     
 
     InitialDtbCtx(&dtb_ctx);
-    if (ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx) == false)
+    if (ReadDTBFile(dtb_addr, DtbCollectHandler, (void*)&dtb_ctx) == false)
     {
         
     }

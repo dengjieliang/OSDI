@@ -48,7 +48,12 @@ static inline void core_timer_enable()
 static inline void unmask_timer_interrupt()
 {
     extern CtxT dtb_ctx;
-    volatile unsigned int* timer_irq_ctrl = (unsigned int*)dtb_ctx.arm_local_interrupt; // 假設這是 timer interrupt controller 的 MMIO 位址，實際位址需根據你的平台調整
+    if (dtb_ctx.interrupt_info.have_arm_local_intc_base == false)
+    {
+        return;
+    }
+
+    volatile unsigned int* timer_irq_ctrl = (unsigned int*)(dtb_ctx.interrupt_info.arm_local_intc_base + 0x40);
     *timer_irq_ctrl = 2; // unmask timer interrupt
 }
 
@@ -59,9 +64,9 @@ void get_timetick()
     int timetick_integer_part = timer_count / timer_freq;
     int decimal_part = ((timer_count % timer_freq) * 10000) / timer_freq;
     
-    async_uart_send_integer(timetick_integer_part);
-    async_uart_send('.');
-    async_uart_send_decimal_part(decimal_part, 4);
+    uart_send_integer(timetick_integer_part);
+    uart_send('.');
+    uart_send_decimal_part(decimal_part, 4);
 }
 
 void set_core_timer_interrupt_tick(unsigned long long timer_count)

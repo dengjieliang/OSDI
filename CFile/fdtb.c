@@ -1,6 +1,93 @@
 #include "../header/fdtb.h"
 #include "../header/utils.h"
-#include <string.h>
+#include "../header/string.h"
+
+enum
+{
+    INTERRUPT_DRIVER_NONE = 0,
+    INTERRUPT_DRIVER_ARM_LOCAL = 1,
+    INTERRUPT_DRIVER_ARM_CTRL = 2,
+};
+
+static bool IsSocInterruptControllerNode(char* nodeStack[MAX_DEPTH], int depth)
+{
+    string_t targetSegments[2];
+    targetSegments[0].string_ptr = "soc";
+    targetSegments[0].size = 3;
+    targetSegments[1].string_ptr = "interrupt-controller";
+    targetSegments[1].size = 20;
+
+    return PathEqualsBase(nodeStack, depth, targetSegments, 2);
+}
+
+static void HandleChosenProps(char* nodeStack[MAX_DEPTH], int depth,
+                            char* nodeValueName,
+                            unsigned long valuePtr, unsigned int valueLength, CtxT* ctx_dtb)
+{
+    string_t chosenSegment[1];
+    chosenSegment[0].string_ptr = "chosen";
+    chosenSegment[0].size = 6;
+
+    if (PathEqualsBase(nodeStack, depth, chosenSegment, 1) == false)
+    {
+        return;
+    }
+
+    if (strcmp(nodeValueName, "linux,initrd-start") == 0)
+    {
+        ctx_dtb->initrd_start = Decode_Initrd_Addr(valuePtr, valueLength);
+        ctx_dtb->have_initrd_start = true;
+    }
+    else if (strcmp(nodeValueName, "linux,initrd-end") == 0)
+    {
+        ctx_dtb->initrd_end = Decode_Initrd_Addr(valuePtr, valueLength);
+        ctx_dtb->have_initrd_end = true;
+    }
+}
+
+static void HandleInterruptControllerNode(char* nodeStack[MAX_DEPTH], int depth,
+                            char* nodeValueName,
+                            unsigned long valuePtr, unsigned int valueLength, CtxT* ctx_dtb)
+{
+    if (IsSocInterruptControllerNode(nodeStack, depth) == false)
+    {
+        return;
+    }
+
+    if (strcmp(nodeValueName, "compatible") == 0)
+    {
+        // Use strncmp with fixed lengths to avoid strcspn/strlen issues
+        if (strncmp((const char*)valuePtr, "brcm,bcm2836-l1-intc", 20) == 0)
+        {
+            ctx_dtb->node_state[depth - 1].matched_driver_id = INTERRUPT_DRIVER_ARM_LOCAL;
+            ctx_dtb->interrupt_info.debug_l1_intc_depth = depth;
+        }
+        else if (strncmp((const char*)valuePtr, "brcm,bcm2836-armctrl-ic", 23) == 0)
+        {
+            ctx_dtb->node_state[depth - 1].matched_driver_id = INTERRUPT_DRIVER_ARM_CTRL;
+            ctx_dtb->interrupt_info.debug_armctrl_depth = depth;
+        }
+    }
+    else if (strcmp(nodeValueName, "reg") == 0)
+    {
+        // reg = <addr size>, only read the addr portion
+        // parent's #address-cells is stored at child_addr_cells[depth-2]
+        unsigned int addr_cells = ctx_dtb->child_addr_cells[depth - 2];
+        if (addr_cells == 0) addr_cells = 1; // default
+        unsigned long reg_base = Decode_Initrd_Addr(valuePtr, addr_cells * 4);
+
+        if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_ARM_LOCAL)
+        {
+            ctx_dtb->interrupt_info.arm_local_intc_base = reg_base;
+            ctx_dtb->interrupt_info.have_arm_local_intc_base = true;
+        }
+        else if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_ARM_CTRL)
+        {
+            ctx_dtb->interrupt_info.arm_ctrl_intc_base = (reg_base & 0x00FFFFFF) | 0x3F000000;
+            ctx_dtb->interrupt_info.have_arm_ctrl_intc_base = true;
+        }
+    }
+}
 
 bool PathEqualsBase(char** nodeStack, int depth, string_t* segments, int compareDepth)
 {
@@ -61,11 +148,14 @@ void InitialDtbCtx(CtxT* dtb_ctx)
     dtb_ctx->uart_mmio_size = 0;
     dtb_ctx->have_uart_reg = false;
 
-    dtb_ctx->arm_local_interrupt = 0;
-    dtb_ctx->have_arm_local_interrupt = false;
+    dtb_ctx->interrupt_info.arm_local_intc_base = 0;
+    dtb_ctx->interrupt_info.have_arm_local_intc_base = false;
 
-    dtb_ctx->arm_ctrl_interrupt = 0;
-    dtb_ctx->have_arm_ctrl_interrupt = false;
+    dtb_ctx->interrupt_info.arm_ctrl_intc_base = 0;
+    dtb_ctx->interrupt_info.have_arm_ctrl_intc_base = false;
+
+    dtb_ctx->interrupt_info.debug_l1_intc_depth = 0;
+    dtb_ctx->interrupt_info.debug_armctrl_depth = 0;
     
     for (int i = 0; i < MAX_MEM_REGIONS; i++)
     {
@@ -115,7 +205,7 @@ void SaveChildCellSize(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
     ((CtxT*)user_dtb)->child_size_cells[depth - 1] = childCellSize;
 }
 
-void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
+void DtbCollectHandler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
                             char* nodeValueName, 
                             unsigned long valuePtr, unsigned int valueLength, void* user_dtb)
 {
@@ -125,32 +215,9 @@ void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
     }
 
     CtxT* ctx_dtb = (CtxT*)user_dtb;
-    ctx_dtb->stdout_target_segments[0].string_ptr = "chosen";
-    ctx_dtb->stdout_target_segments[0].size = 6;
-    if (PathEqualsBase(nodeStack, depth, ctx_dtb->stdout_target_segments, 1) == false)
-    {
-        return;
-    }
 
-    if (strcmp(nodeValueName, "linux,initrd-start") == 0)
-    {
-        ctx_dtb->initrd_start = Decode_Initrd_Addr(valuePtr, valueLength);
-        ctx_dtb->have_initrd_start = true;
-    }
-    else if (strcmp(nodeValueName, "linux,initrd-end") == 0)
-    {
-        ctx_dtb->initrd_end = Decode_Initrd_Addr(valuePtr, valueLength);
-        ctx_dtb->have_initrd_end = true;
-    }
-    else if (strcmp(nodeValueName, "brcm,bcm2836-l1-intc") == 0)
-    {
-        ctx_dtb->arm_local_interrupt = Decode_Initrd_Addr(valuePtr, valueLength);
-        ctx_dtb->have_arm_local_interrupt = true;
-    }
-    else if (strcmp(nodeValueName, "brcm,bcm2836-armctrl-intc") == 0)
-    {
-        ctx_dtb->arm_ctrl_interrupt = Decode_Initrd_Addr(valuePtr, valueLength);
-        ctx_dtb->arm_ctrl_interrupt = (ctx_dtb->arm_ctrl_interrupt & 0x00FFFFFF) | 0x3F000000; // set bit30 to indicate it's a arm ctrl interrupt
-        ctx_dtb->have_arm_ctrl_interrupt = true;
-    }
+    SaveChildCellAddr(event, nodeStack, depth, nodeValueName, valuePtr, valueLength, user_dtb);
+    SaveChildCellSize(event, nodeStack, depth, nodeValueName, valuePtr, valueLength, user_dtb);
+    HandleChosenProps(nodeStack, depth, nodeValueName, valuePtr, valueLength, ctx_dtb);
+    HandleInterruptControllerNode(nodeStack, depth, nodeValueName, valuePtr, valueLength, ctx_dtb);
 }

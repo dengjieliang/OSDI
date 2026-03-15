@@ -23,6 +23,19 @@ typedef struct node_state
     unsigned int valid_reg_count;
 } NodeStateT;
 
+typedef struct interrupt_info
+{
+    unsigned long arm_local_intc_base;
+    bool have_arm_local_intc_base;
+
+    unsigned long arm_ctrl_intc_base;
+    bool have_arm_ctrl_intc_base;
+
+    // debug: depth at which compatible was matched (0 = never)
+    int debug_l1_intc_depth;
+    int debug_armctrl_depth;
+} InterruptInfoT;
+
 typedef struct ctx
 {
     //initramfs的開頭和結尾,kernel 要用它當作 initramfs（cpio archive）的位置起點
@@ -41,11 +54,7 @@ typedef struct ctx
     unsigned int uart_mmio_size;
     bool have_uart_reg;
 
-    unsigned long arm_local_interrupt;
-    bool have_arm_local_interrupt;
-
-    unsigned long arm_ctrl_interrupt;
-    bool have_arm_ctrl_interrupt;
+    InterruptInfoT interrupt_info;
 
 
     //記錄 RAM 的實體範圍
@@ -59,7 +68,7 @@ typedef struct ctx
 
 void InitialDtbCtx(CtxT* dtb_ctx);
 
-void Initrd_Handler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
+void DtbCollectHandler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
                             char* nodeValueName, 
                             unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
 void SaveChildCellAddr(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 

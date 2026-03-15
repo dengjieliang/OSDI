@@ -41,7 +41,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 ## 0.4 Kernel 主流程（Kernel Core / Interactive Loop）
 
 - `CFile/kernel_main.c`：
-    - parse DTB：先呼叫 `InitialDtbCtx(&dtb_ctx)`，再用 `ReadDTBFile(dtb_addr, Initrd_Handler, &dtb_ctx)` 解析 bootloader 傳入的 DTB。
+    - parse DTB：先呼叫 `InitialDtbCtx(&dtb_ctx)`，再用 `ReadDTBFile(dtb_addr, DtbCollectHandler, &dtb_ctx)` 解析 bootloader 傳入的 DTB。
     - re-init UART：再次初始化 UART（確保硬體狀態正確）。
     - install vectors：呼叫 `set_exception_vector_table()`，將 EL1 例外向量表安裝到 `VBAR_EL1`。
     - print welcome：印出 `Welcome to OSDI` 確認已進入 Kernel。
@@ -972,7 +972,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
     - `void InitialDtbCtx(CtxT* dtb_ctx);`：初始化/清空 context
         
-    - `void Initrd_Handler(...)`：走訪到 `/chosen` 時擷取 `linux,initrd-start`/`linux,initrd-end`
+    - `void DtbCollectHandler(...)`：走訪到 `/chosen` 時擷取 `linux,initrd-start`/`linux,initrd-end`
         
     - `void SaveChildCellAddr(...)`：遇到 `#address-cells` 時保存到 `child_addr_cells[depth-1]`
         
@@ -1062,7 +1062,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
         - `child_size_cells[depth - 1]`
             
 
-#### `void Initrd_Handler(...)`
+#### `void DtbCollectHandler(...)`
 
 - 功能：在 DTB traversal 過程中，擷取 `/chosen` node 下的 initrd 範圍
     
@@ -1079,7 +1079,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
         - `"linux,initrd-end"` → `initrd_end = Decode_Initrd_Addr(...)`，並標記 `have_initrd_end = true`
             
 
-> 現況注意：`Initrd_Handler()` 目前只處理 `/chosen` 的 initrd 兩個 property；`CtxT` 內 stdout/UART/mem_regions 等欄位尚未在本檔案看到對應的填值流程（可能預留給後續擴充 callback）。
+> 現況注意：`DtbCollectHandler()` 目前只處理 `/chosen` 的 initrd 兩個 property；`CtxT` 內 stdout/UART/mem_regions 等欄位尚未在本檔案看到對應的填值流程（可能預留給後續擴充 callback）。
 
 # 10. 系統計時器 (System Timer)
 ## `time.h`
@@ -2081,7 +2081,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
     - 程式碼最前段保留除錯鎖註解（`volatile int lock = 1; while(lock);`），需要時可取消註解用於 early boot 停住除錯。
   - 使用全域 `dtb_ctx` 作為 DTB 解析與狀態保存的 context。
   - `InitialDtbCtx(&dtb_ctx)`：初始化 context。
-  - `ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx)`：解析 DTB blob，並透過 callback（`Initrd_Handler`）處理 DTB 內與 initrd 相關的節點/資訊（實際行為取決於 dtb/fdtb 模組實作）。
+  - `ReadDTBFile(dtb_addr, DtbCollectHandler, (void*)&dtb_ctx)`：解析 DTB blob，並透過 callback（`DtbCollectHandler`）處理 DTB 內與 initrd 相關的節點/資訊（實際行為取決於 dtb/fdtb 模組實作）。
     - 若解析失敗（回傳 `false`），目前 `if` 分支為空（尚未做錯誤輸出/復原）。
 - **UART 與互動主迴圈**
     - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
@@ -2096,7 +2096,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
     
 - `../header/dtb.h`：`ReadDTBFile` 解析函式。
     
-- `../header/fdtb.h`：`CtxT` 結構與 `Initrd_Handler` 邏輯。
+- `../header/fdtb.h`：`CtxT` 結構與 `DtbCollectHandler` 邏輯。
 
 - `../header/exception.h`：`set_exception_vector_table()` 宣告。
     
@@ -2119,11 +2119,11 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
     
     - 呼叫 `InitialDtbCtx(&dtb_ctx)` 初始化上下文。
         
-    - 呼叫 `ReadDTBFile(dtb_addr, Initrd_Handler, (void*)&dtb_ctx)`：
+    - 呼叫 `ReadDTBFile(dtb_addr, DtbCollectHandler, (void*)&dtb_ctx)`：
         
         - 遍歷 DTB 結構。
             
-        - 透過 `Initrd_Handler` 抓取 `/chosen` 節點下的 `linux,initrd-start` 與 `end`。
+        - 透過 `DtbCollectHandler` 抓取 `/chosen` 節點下的 `linux,initrd-start` 與 `end`。
             
         - 解析結果存於全域變數 `dtb_ctx` 中。
             

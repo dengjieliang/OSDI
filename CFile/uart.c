@@ -110,13 +110,17 @@ void uart_init()
     gpfsel1 &= GPFSEL1_CLEAR_VALUE;
     gpfsel1 |= GPFSEL1_ALT5_GPIO14_15;
     mmio_write(GPFSEL1, gpfsel1);
+}
 
-    //開啟TX/RX
-    aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
+void aux_mu_cntl_reg()
+{
+    unsigned int aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
     aux_mu_cntl_reg |= AUX_TX_RX_ENABLE_MASK;
     mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
+}
 
-    //重新開啟中斷
+void uart_open_ier_reg()
+{
     unsigned int ier = mmio_read(AUX_MU_IER_REG);
     ier |= AUX_MU_IER_RX_ENABLE; // 0x01
     mmio_write(AUX_MU_IER_REG, ier);
