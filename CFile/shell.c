@@ -26,6 +26,7 @@ static void cmd_test_el0_user_mode(int argc, char* argv[]);
 
 static void split_command(int* argc, char* argv[]);
 static void cmd_dtb_intc(int argc, char* argv[]);
+static void cmd_fdtb(int argc, char* argv[]);
 
 static const Command_t commands[] = 
 {
@@ -42,6 +43,7 @@ static const Command_t commands[] =
     {"test_bad_read", "Test EL1 Bad Read", cmd_test_el1_bad_read},
     {"test_user_mode", "Test User Mode", cmd_test_el0_user_mode},
     {"dtb_intc", "Show parsed interrupt controller base addresses", cmd_dtb_intc},
+    {"fdtb", "Dump parsed DTB context (initrd, UART, GPIO, INTC bases)", cmd_fdtb},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -82,6 +84,10 @@ char* shell_input_line()
     {
         char c = async_uart_recv();
         
+        if ((c == '\r' || c == '\n') && buffer_index == 0)
+        {
+            continue;
+        }
         if (c == '\r' || c == '\n') // Handle Enter key
         {
             async_uart_puts("\n");
@@ -386,4 +392,79 @@ static void cmd_dtb_intc(int argc, char* argv[])
     {
         async_uart_puts("NOT FOUND\n");
     }
+}
+
+static void cmd_fdtb(int argc, char* argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    extern CtxT dtb_ctx;
+
+    async_uart_puts("=== Parsed DTB Context ===\n");
+
+    async_uart_puts("initrd_start: ");
+    if (dtb_ctx.have_initrd_start)
+    {
+        async_uart_send_hex((unsigned int)(dtb_ctx.initrd_start >> 32));
+        async_uart_send_hex((unsigned int)(dtb_ctx.initrd_start & 0xFFFFFFFFUL));
+        async_uart_puts("\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
+
+    async_uart_puts("initrd_end:   ");
+    if (dtb_ctx.have_initrd_end)
+    {
+        async_uart_send_hex((unsigned int)(dtb_ctx.initrd_end >> 32));
+        async_uart_send_hex((unsigned int)(dtb_ctx.initrd_end & 0xFFFFFFFFUL));
+        async_uart_puts("\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
+
+    async_uart_puts("uart_mmio:    ");
+    if (dtb_ctx.have_uart_reg)
+    {
+        async_uart_puts("base=0x");
+        async_uart_send_hex((unsigned int)dtb_ctx.uart_mmio_base);
+        async_uart_puts(" size=0x");
+        async_uart_send_hex(dtb_ctx.uart_mmio_size);
+        async_uart_puts("\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
+
+    async_uart_puts("aux_mmio:     ");
+    if (dtb_ctx.have_aux_reg)
+    {
+        async_uart_puts("base=0x");
+        async_uart_send_hex((unsigned int)dtb_ctx.aux_mmio_base);
+        async_uart_puts("\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
+
+    async_uart_puts("gpio_mmio:    ");
+    if (dtb_ctx.have_gpio_reg)
+    {
+        async_uart_puts("base=0x");
+        async_uart_send_hex((unsigned int)dtb_ctx.gpio_mmio_base);
+        async_uart_puts("\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
+
+    async_uart_puts("arm_local_intc: ");
+    if (dtb_ctx.interrupt_info.have_arm_local_intc_base)
+    {
+        async_uart_puts("0x");
+        async_uart_send_hex((unsigned int)dtb_ctx.interrupt_info.arm_local_intc_base);
+        async_uart_puts(" (expect 0x40000000)\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
+
+    async_uart_puts("arm_ctrl_intc:  ");
+    if (dtb_ctx.interrupt_info.have_arm_ctrl_intc_base)
+    {
+        async_uart_puts("0x");
+        async_uart_send_hex((unsigned int)dtb_ctx.interrupt_info.arm_ctrl_intc_base);
+        async_uart_puts(" (expect 0x3F00B200)\n");
+    }
+    else { async_uart_puts("NOT FOUND\n"); }
 }

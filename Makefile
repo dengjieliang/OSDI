@@ -45,17 +45,19 @@ OBJ_ASM_KERNEL := $(BUILD_DIR)/exception_table.o $(BUILD_DIR)/user_mode_entry.o
 
 # 組合共用 Object 清單
 OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM_COMMON)
+OBJ_COMMON_BOOT := $(filter-out $(BUILD_DIR)/uart.o $(BUILD_DIR)/cpio.o,$(OBJ_COMMON_ALL))
+OBJ_COMMON_KERNEL := $(OBJ_COMMON_ALL)
 
 # 設定 Entry Point Object (boot.o 必須在最前面)
 BOOT_START_OBJ := $(BUILD_DIR)/boot.o
 EXCEPTION_C_OBJ := $(BUILD_DIR)/exception.o
 
 # ==== 定義最終兩組 Object 清單 (關鍵修正) ====
-# Bootloader = boot.o + 共用.o + bootloader_main.o
-OBJS_FOR_BOOTLOADER := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(BUILD_DIR)/bootloader_main.o
+# Bootloader = boot.o + boot 專用共用.o + bootloader_main.o
+OBJS_FOR_BOOTLOADER := $(BOOT_START_OBJ) $(OBJ_COMMON_BOOT) $(BUILD_DIR)/bootloader_main.o
 
 # Kernel = boot.o + 共用.o + kernel_main.o
-OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_ALL) $(OBJ_ASM_KERNEL) $(EXCEPTION_C_OBJ) $(BUILD_DIR)/time.o $(BUILD_DIR)/shell.o $(BUILD_DIR)/kernel_main.o
+OBJS_FOR_KERNEL     := $(BOOT_START_OBJ) $(OBJ_COMMON_KERNEL) $(OBJ_ASM_KERNEL) $(EXCEPTION_C_OBJ) $(BUILD_DIR)/time.o $(BUILD_DIR)/shell.o $(BUILD_DIR)/kernel_main.o
 
 # ==========================================
 # 5. 定義輸出檔名

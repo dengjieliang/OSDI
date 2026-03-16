@@ -2,23 +2,20 @@
 #include "../header/utils.h"
 #include "../header/string.h"
 
+#define AUX_MMIO_BASE_DEFAULT  (MMIO_BASE + 0x215000)
+#define UART_MMIO_BASE_DEFAULT (MMIO_BASE + 0x215040)
+#define GPIO_MMIO_BASE_DEFAULT (MMIO_BASE + 0x200000)
+#define IRQ_MMIO_BASE_DEFAULT  (MMIO_BASE + 0xB200)
+
 enum
 {
     INTERRUPT_DRIVER_NONE = 0,
     INTERRUPT_DRIVER_ARM_LOCAL = 1,
     INTERRUPT_DRIVER_ARM_CTRL = 2,
+    INTERRUPT_DRIVER_AUX_UART = 3,
+    INTERRUPT_DRIVER_AUX = 4,
+    INTERRUPT_DRIVER_GPIO = 5,
 };
-
-static bool IsSocInterruptControllerNode(char* nodeStack[MAX_DEPTH], int depth)
-{
-    string_t targetSegments[2];
-    targetSegments[0].string_ptr = "soc";
-    targetSegments[0].size = 3;
-    targetSegments[1].string_ptr = "interrupt-controller";
-    targetSegments[1].size = 20;
-
-    return PathEqualsBase(nodeStack, depth, targetSegments, 2);
-}
 
 static void HandleChosenProps(char* nodeStack[MAX_DEPTH], int depth,
                             char* nodeValueName,
@@ -45,11 +42,40 @@ static void HandleChosenProps(char* nodeStack[MAX_DEPTH], int depth,
     }
 }
 
-static void HandleInterruptControllerNode(char* nodeStack[MAX_DEPTH], int depth,
+static void HandleSocPeripheralNode(char* nodeStack[MAX_DEPTH], int depth,
                             char* nodeValueName,
                             unsigned long valuePtr, unsigned int valueLength, CtxT* ctx_dtb)
 {
-    if (IsSocInterruptControllerNode(nodeStack, depth) == false)
+    string_t interruptCtrlPath[2];
+    interruptCtrlPath[0].string_ptr = "soc";
+    interruptCtrlPath[0].size = 3;
+    interruptCtrlPath[1].string_ptr = "interrupt-controller";
+    interruptCtrlPath[1].size = 20;
+
+    string_t serialPath[2];
+    serialPath[0].string_ptr = "soc";
+    serialPath[0].size = 3;
+    serialPath[1].string_ptr = "serial";
+    serialPath[1].size = 6;
+
+    string_t auxPath[2];
+    auxPath[0].string_ptr = "soc";
+    auxPath[0].size = 3;
+    auxPath[1].string_ptr = "aux";
+    auxPath[1].size = 3;
+
+    string_t gpioPath[2];
+    gpioPath[0].string_ptr = "soc";
+    gpioPath[0].size = 3;
+    gpioPath[1].string_ptr = "gpio";
+    gpioPath[1].size = 4;
+
+    bool is_interrupt_ctrl = PathEqualsBase(nodeStack, depth, interruptCtrlPath, 2);
+    bool is_serial = PathEqualsBase(nodeStack, depth, serialPath, 2);
+    bool is_aux = PathEqualsBase(nodeStack, depth, auxPath, 2);
+    bool is_gpio = PathEqualsBase(nodeStack, depth, gpioPath, 2);
+
+    if (is_interrupt_ctrl == false && is_serial == false && is_aux == false && is_gpio == false)
     {
         return;
     }
@@ -67,24 +93,64 @@ static void HandleInterruptControllerNode(char* nodeStack[MAX_DEPTH], int depth,
             ctx_dtb->node_state[depth - 1].matched_driver_id = INTERRUPT_DRIVER_ARM_CTRL;
             ctx_dtb->interrupt_info.debug_armctrl_depth = depth;
         }
+        else if (strncmp((const char*)valuePtr, "brcm,bcm2835-aux-uart", 21) == 0)
+        {
+            ctx_dtb->node_state[depth - 1].matched_driver_id = INTERRUPT_DRIVER_AUX_UART;
+        }
+        else if (strncmp((const char*)valuePtr, "brcm,bcm2835-aux", 16) == 0)
+        {
+            ctx_dtb->node_state[depth - 1].matched_driver_id = INTERRUPT_DRIVER_AUX;
+        }
+        else if (strncmp((const char*)valuePtr, "brcm,bcm2835-gpio", 17) == 0)
+        {
+            ctx_dtb->node_state[depth - 1].matched_driver_id = INTERRUPT_DRIVER_GPIO;
+        }
     }
     else if (strcmp(nodeValueName, "reg") == 0)
     {
-        // reg = <addr size>, only read the addr portion
-        // parent's #address-cells is stored at child_addr_cells[depth-2]
         unsigned int addr_cells = ctx_dtb->child_addr_cells[depth - 2];
+        unsigned int size_cells = ctx_dtb->child_size_cells[depth - 2];
         if (addr_cells == 0) addr_cells = 1; // default
+        if (size_cells == 0) size_cells = 1; // default
+
         unsigned long reg_base = Decode_Initrd_Addr(valuePtr, addr_cells * 4);
+        unsigned long reg_size = Decode_Initrd_Addr(valuePtr + (addr_cells * 4), size_cells * 4);
+        unsigned long cpu_mmio_base = reg_base;
+
+        if ((reg_base & 0xFF000000UL) == 0x7E000000UL)
+        {
+            cpu_mmio_base = (reg_base & 0x00FFFFFFUL) | 0x3F000000UL;
+        }
+        else if ((reg_base & 0xFF000000UL) == 0x00000000UL)
+        {
+            cpu_mmio_base = (reg_base & 0x00FFFFFFUL) | 0x3F000000UL;
+        }
 
         if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_ARM_LOCAL)
         {
-            ctx_dtb->interrupt_info.arm_local_intc_base = reg_base;
+            ctx_dtb->interrupt_info.arm_local_intc_base = cpu_mmio_base;
             ctx_dtb->interrupt_info.have_arm_local_intc_base = true;
         }
         else if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_ARM_CTRL)
         {
-            ctx_dtb->interrupt_info.arm_ctrl_intc_base = (reg_base & 0x00FFFFFF) | 0x3F000000;
+            ctx_dtb->interrupt_info.arm_ctrl_intc_base = cpu_mmio_base;
             ctx_dtb->interrupt_info.have_arm_ctrl_intc_base = true;
+        }
+        else if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_AUX_UART)
+        {
+            ctx_dtb->uart_mmio_base = cpu_mmio_base;
+            ctx_dtb->uart_mmio_size = (unsigned int)reg_size;
+            ctx_dtb->have_uart_reg = true;
+        }
+        else if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_AUX)
+        {
+            ctx_dtb->aux_mmio_base = cpu_mmio_base;
+            ctx_dtb->have_aux_reg = true;
+        }
+        else if (ctx_dtb->node_state[depth - 1].matched_driver_id == INTERRUPT_DRIVER_GPIO)
+        {
+            ctx_dtb->gpio_mmio_base = cpu_mmio_base;
+            ctx_dtb->have_gpio_reg = true;
         }
     }
 }
@@ -144,15 +210,19 @@ void InitialDtbCtx(CtxT* dtb_ctx)
     dtb_ctx->stdout_target_depth = 0;
     dtb_ctx->have_stdout_target = false;
 
-    dtb_ctx->uart_mmio_base = 0;
+    dtb_ctx->uart_mmio_base = UART_MMIO_BASE_DEFAULT;
     dtb_ctx->uart_mmio_size = 0;
-    dtb_ctx->have_uart_reg = false;
+    dtb_ctx->have_uart_reg = true;
+    dtb_ctx->aux_mmio_base = AUX_MMIO_BASE_DEFAULT;
+    dtb_ctx->have_aux_reg = true;
+    dtb_ctx->gpio_mmio_base = GPIO_MMIO_BASE_DEFAULT;
+    dtb_ctx->have_gpio_reg = true;
 
     dtb_ctx->interrupt_info.arm_local_intc_base = 0;
     dtb_ctx->interrupt_info.have_arm_local_intc_base = false;
 
-    dtb_ctx->interrupt_info.arm_ctrl_intc_base = 0;
-    dtb_ctx->interrupt_info.have_arm_ctrl_intc_base = false;
+    dtb_ctx->interrupt_info.arm_ctrl_intc_base = IRQ_MMIO_BASE_DEFAULT;
+    dtb_ctx->interrupt_info.have_arm_ctrl_intc_base = true;
 
     dtb_ctx->interrupt_info.debug_l1_intc_depth = 0;
     dtb_ctx->interrupt_info.debug_armctrl_depth = 0;
@@ -219,5 +289,5 @@ void DtbCollectHandler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
     SaveChildCellAddr(event, nodeStack, depth, nodeValueName, valuePtr, valueLength, user_dtb);
     SaveChildCellSize(event, nodeStack, depth, nodeValueName, valuePtr, valueLength, user_dtb);
     HandleChosenProps(nodeStack, depth, nodeValueName, valuePtr, valueLength, ctx_dtb);
-    HandleInterruptControllerNode(nodeStack, depth, nodeValueName, valuePtr, valueLength, ctx_dtb);
+    HandleSocPeripheralNode(nodeStack, depth, nodeValueName, valuePtr, valueLength, ctx_dtb);
 }

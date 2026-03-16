@@ -1,3 +1,4 @@
+#include "../header/early_uart.h"
 #include "../header/uart.h"
 #include "../header/shell.h"
 #include "../header/dtb.h"
@@ -16,11 +17,16 @@ void kernel_main(void* dtb_addr)
     InitialDtbCtx(&dtb_ctx);
     if (ReadDTBFile(dtb_addr, DtbCollectHandler, (void*)&dtb_ctx) == false)
     {
-        
+        early_uart_init();
+        early_uart_puts("Failed to read DTB file.\n");
+        return;
     }
 
+    common_init_from_dtb(&dtb_ctx);
+
     // 第二次初始化，雖然硬體已經開了，但為了保險，重新設定一次
-    uart_init();
+    //uart_init();
+    uart_init_dynamic();
     uart_aux_mu_cntl_reg();
     uart_open_ier_reg();
 

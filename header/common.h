@@ -40,13 +40,21 @@
 #define MAX_STRING_SIZE 1024
 #endif
 
-#define KERNEL_LOAD_ADDRESS 0x80000UL
+typedef struct common_mmio_info
+{
+    unsigned long mmio_base;
+    unsigned long gpio_base;
+} CommonMmioInfoT;
+
+extern CommonMmioInfoT common_mmio;
+struct ctx;
+void common_init_from_dtb(struct ctx* dtb_ctx);
 
 //MMIO base address
-#define MMIO_BASE       0x3F000000
+#define MMIO_BASE       (common_mmio.mmio_base)
 
 //GPIO registers
-#define GPIO_BASE       (MMIO_BASE + 0x200000)
+#define GPIO_BASE       (common_mmio.gpio_base)
 #define GPFSEL1        (GPIO_BASE + 0x04)
 #define GPPUD         (GPIO_BASE + 0x94)
 #define GPPUDCLK0     (GPIO_BASE + 0x98)

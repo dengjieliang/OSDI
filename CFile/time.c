@@ -53,8 +53,7 @@ static inline void unmask_timer_interrupt()
         return;
     }
 
-    volatile unsigned int* timer_irq_ctrl = (unsigned int*)(dtb_ctx.interrupt_info.arm_local_intc_base + 0x40);
-    *timer_irq_ctrl = 2; // unmask timer interrupt
+    mmio_write(dtb_ctx.interrupt_info.arm_local_intc_base + 0x40, 2); // unmask timer interrupt
 }
 
 void get_timetick()

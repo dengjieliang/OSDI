@@ -3,6 +3,7 @@
 
 //initializes mini UART
 void uart_init();
+void uart_init_dynamic();
 void uart_aux_mu_cntl_reg();
 void uart_open_ier_reg();
 void uart_interrupt_handler();
@@ -19,6 +20,7 @@ void uart_send_hex(unsigned int number);
 void async_uart_send(char c);
 void async_uart_puts(const char *s);
 char async_uart_recv();
+void async_uart_reset_rx();
 unsigned int async_uart_recv_uint();
 void async_uart_send_integer(int number);
 void async_uart_send_unsigned_long_integer(unsigned long number);

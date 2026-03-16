@@ -53,6 +53,10 @@ typedef struct ctx
     unsigned long uart_mmio_base;
     unsigned int uart_mmio_size;
     bool have_uart_reg;
+    unsigned long aux_mmio_base;
+    bool have_aux_reg;
+    unsigned long gpio_mmio_base;
+    bool have_gpio_reg;
 
     InterruptInfoT interrupt_info;
 
@@ -68,14 +72,14 @@ typedef struct ctx
 
 void InitialDtbCtx(CtxT* dtb_ctx);
 
-void DtbCollectHandler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
+void DtbCollectHandler(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
+                            char* nodeValueName,
                             unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
-void SaveChildCellAddr(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
+void SaveChildCellAddr(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
+                            char* nodeValueName,
                             unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
-void SaveChildCellSize(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth, 
-                            char* nodeValueName, 
+void SaveChildCellSize(NodeEnum event, char* nodeStack[MAX_DEPTH], int depth,
+                            char* nodeValueName,
                             unsigned long valuePtr, unsigned int valueLength, void* user_dtb);
 
 bool PathEqualsBase(char** nodeStack, int depth, string_t* segments, int compareDepth);

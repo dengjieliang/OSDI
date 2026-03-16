@@ -1,19 +1,33 @@
 #include "../header/common.h"
 #include "../header/uart.h"
+#include "../header/fdtb.h"
 
-//UART registers
-#define AUX_BASE       (MMIO_BASE + 0x215000)
-#define AUX_ENABLES    (AUX_BASE + 0x04)    //控制啟用 mini UART
-#define AUX_MU_IO_REG  (AUX_BASE + 0x40)    //收/發資料
-#define AUX_MU_IER_REG (AUX_BASE + 0x44)    //中斷 enable
-#define AUX_MU_LCR_REG (AUX_BASE + 0x4C)    //資料格式，例如 8-bit
-#define AUX_MU_IIR_REG (AUX_BASE + 0x48)    //中斷狀態/FIFO 控制
-#define AUX_MU_MCR_REG (AUX_BASE + 0x50)    //modem control，關閉 flow control
-#define AUX_MU_LSR_REG (AUX_BASE + 0x54)    //line status，確認 TX 可寫、RX 有資料
-#define AUX_MU_CNTL_REG (AUX_BASE + 0x60)   //啟用/關閉 TX/RX
-#define AUX_MU_STAT_REG (AUX_BASE + 0x64)   //存更多狀態資訊，很多人實作時只用 LSR 也行。也可以從這裡看 FIFO 狀態。
-#define AUX_MU_BAUD_REG (AUX_BASE + 0x68)   //baud rate
-#define IRQ_ENABLE1    (MMIO_BASE + 0xB210)   // interrupt controller Enable IRQs 1
+#define EARLY_AUX_BASE       (0x3F000000UL + 0x215000UL)
+#define EARLY_AUX_MU_IO_REG  (EARLY_AUX_BASE + 0x40UL)
+#define EARLY_AUX_MU_LSR_REG (EARLY_AUX_BASE + 0x54UL)
+
+typedef struct uart_reg_info
+{
+    unsigned long aux_base;
+    unsigned long uart_base;
+    unsigned long irq_base;
+
+    unsigned long aux_enables;
+    unsigned long aux_mu_io_reg;
+    unsigned long aux_mu_ier_reg;
+    unsigned long aux_mu_iir_reg;
+    unsigned long aux_mu_lcr_reg;
+    unsigned long aux_mu_mcr_reg;
+    unsigned long aux_mu_lsr_reg;
+    unsigned long aux_mu_cntl_reg;
+    unsigned long aux_mu_stat_reg;
+    unsigned long aux_mu_baud_reg;
+    unsigned long irq_enable1;
+
+    bool is_ready;
+} UartRegInfoT;
+
+static UartRegInfoT uart_reg_info;
 
 #define AUX_ENABLES_MASK (1)    //啟用 mini UART 的位元遮罩
 #define AUX_TX_RX_DISABLE_MASK ~(3) // 關閉 TX/RX 的位元遮罩
@@ -46,42 +60,90 @@
 
 #define MAX_BUFFER_SIZE 1024
 static char rx_buffer[MAX_BUFFER_SIZE];
-static int rx_head = 0;
-static int rx_tail = 0;
+static volatile int rx_head = 0;
+static volatile int rx_tail = 0;
 
 static char tx_buffer[MAX_BUFFER_SIZE];
-static int tx_head = 0;
-static int tx_tail = 0;
+static volatile int tx_head = 0;
+static volatile int tx_tail = 0;
+
+static void uart_rx_pump(void)
+{
+    while (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_RX_FIFO_EMPTY)
+    {
+        unsigned int read_byte = mmio_read(uart_reg_info.aux_mu_io_reg);
+        char c = (char)(read_byte & AUX_CHAR_MASK);
+
+        int next_tail = (rx_tail + 1) % MAX_BUFFER_SIZE;
+        if (next_tail == rx_head)
+        {
+            rx_head = (rx_head + 1) % MAX_BUFFER_SIZE;
+        }
+
+        rx_buffer[rx_tail] = c;
+        rx_tail = next_tail;
+    }
+}
+
+static void uart_assemble_registers(void)
+{
+    extern CtxT dtb_ctx;
+
+    uart_reg_info.aux_base = dtb_ctx.aux_mmio_base;
+    uart_reg_info.uart_base = dtb_ctx.uart_mmio_base;
+    uart_reg_info.irq_base = dtb_ctx.interrupt_info.arm_ctrl_intc_base;
+
+    uart_reg_info.aux_enables = uart_reg_info.aux_base + 0x04;
+
+    uart_reg_info.aux_mu_io_reg = uart_reg_info.uart_base + 0x00;
+    uart_reg_info.aux_mu_ier_reg = uart_reg_info.uart_base + 0x04;
+    uart_reg_info.aux_mu_iir_reg = uart_reg_info.uart_base + 0x08;
+    uart_reg_info.aux_mu_lcr_reg = uart_reg_info.uart_base + 0x0C;
+    uart_reg_info.aux_mu_mcr_reg = uart_reg_info.uart_base + 0x10;
+    uart_reg_info.aux_mu_lsr_reg = uart_reg_info.uart_base + 0x14;
+    uart_reg_info.aux_mu_cntl_reg = uart_reg_info.uart_base + 0x20;
+    uart_reg_info.aux_mu_stat_reg = uart_reg_info.uart_base + 0x24;
+    uart_reg_info.aux_mu_baud_reg = uart_reg_info.uart_base + 0x28;
+
+    uart_reg_info.irq_enable1 = uart_reg_info.irq_base + 0x10;
+
+    uart_reg_info.is_ready = true;
+}
 
 void uart_init()
 {
+    if (uart_reg_info.is_ready == false)
+    {
+        uart_assemble_registers();
+    }
+
     //控制 mini UART啟用
-    unsigned int aux_enables = mmio_read(AUX_ENABLES);
+    unsigned int aux_enables = mmio_read(uart_reg_info.aux_enables);
     aux_enables |= AUX_ENABLES_MASK;
-    mmio_write(AUX_ENABLES, aux_enables);
+    mmio_write(uart_reg_info.aux_enables, aux_enables);
 
     //關閉TX/RX(資料接收的設定先關閉，以防變更設定時寫入錯誤資料至mmio)
-    unsigned int aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
+    unsigned int aux_mu_cntl_reg = mmio_read(uart_reg_info.aux_mu_cntl_reg);
     aux_mu_cntl_reg &= AUX_TX_RX_DISABLE_MASK;
-    mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
+    mmio_write(uart_reg_info.aux_mu_cntl_reg, aux_mu_cntl_reg);
 
     //關閉中斷，避免在動FIFO時CPU觸發這裡的INTERRUPT導致陷入無窮迴圈
-    unsigned int aux_mu_ier_reg = mmio_read(AUX_MU_IER_REG);
+    unsigned int aux_mu_ier_reg = mmio_read(uart_reg_info.aux_mu_ier_reg);
     aux_mu_ier_reg &= AUX_INTERRUPT_DISABLE_MASK;
-    mmio_write(AUX_MU_IER_REG, aux_mu_ier_reg);
+    mmio_write(uart_reg_info.aux_mu_ier_reg, aux_mu_ier_reg);
 
     //控制 Flow Control (流量控制) 的訊號線，避免cpu受 flow control 干擾
-    mmio_write(AUX_MU_MCR_REG, AUX_CLOSE_FLOW_CONTROL);
+    mmio_write(uart_reg_info.aux_mu_mcr_reg, AUX_CLOSE_FLOW_CONTROL);
 
     //清空FIFO，這個暫存器讀出來的數值為中斷狀態。但寫進去的數值(只有第1、2bit可寫其他為READ-ONLY或Reserved Bits)
     //代表是否清空FIFObit 1 = 1 → 清 RX FIFO，bit 2 = 1 → 清 TX FIFO
-    mmio_write(AUX_MU_IIR_REG, AUX_CLEAR_TX_RX_FIFO);
+    mmio_write(uart_reg_info.aux_mu_iir_reg, AUX_CLEAR_TX_RX_FIFO);
 
     //決定mini UART資料格式
-    mmio_write(AUX_MU_LCR_REG, AUX_MINI_UART_DATA_TYPE);
+    mmio_write(uart_reg_info.aux_mu_lcr_reg, AUX_MINI_UART_DATA_TYPE);
 
     //設定傳送速度
-    mmio_write(AUX_MU_BAUD_REG, AUX_BAUD_RATE_115200);
+    mmio_write(uart_reg_info.aux_mu_baud_reg, AUX_BAUD_RATE_115200);
 
     //disable pull-up/down
     mmio_write(GPPUD, GPPUD_SETUP_VALUE);
@@ -113,37 +175,40 @@ void uart_init()
     mmio_write(GPFSEL1, gpfsel1);
 }
 
+void uart_init_dynamic()
+{
+    uart_assemble_registers();
+    uart_init();
+}
+
 void uart_aux_mu_cntl_reg()
 {
-    unsigned int aux_mu_cntl_reg = mmio_read(AUX_MU_CNTL_REG);
+    unsigned int aux_mu_cntl_reg = mmio_read(uart_reg_info.aux_mu_cntl_reg);
     aux_mu_cntl_reg |= AUX_TX_RX_ENABLE_MASK;
-    mmio_write(AUX_MU_CNTL_REG, aux_mu_cntl_reg);
+    mmio_write(uart_reg_info.aux_mu_cntl_reg, aux_mu_cntl_reg);
 }
 
 void uart_open_ier_reg()
 {
-    unsigned int ier = mmio_read(AUX_MU_IER_REG);
+    unsigned int ier = mmio_read(uart_reg_info.aux_mu_ier_reg);
     ier |= AUX_MU_IER_RX_ENABLE; // 0x01
-    mmio_write(AUX_MU_IER_REG, ier);
+    mmio_write(uart_reg_info.aux_mu_ier_reg, ier);
 
     // [新增] 啟用第二層中斷控制器的 AUX IRQ (Bit 29)
-    unsigned int enable_irq1 = mmio_read(IRQ_ENABLE1);
+    unsigned int enable_irq1 = mmio_read(uart_reg_info.irq_enable1);
     enable_irq1 |= (1 << 29);
-    mmio_write(IRQ_ENABLE1, enable_irq1);
+    mmio_write(uart_reg_info.irq_enable1, enable_irq1);
 }
 
 void uart_interrupt_handler()
 {
-    unsigned int iir = mmio_read(AUX_MU_IIR_REG);
+    unsigned int iir = mmio_read(uart_reg_info.aux_mu_iir_reg);
+
+    uart_rx_pump();
 
     if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_RX)
     {
-        //讀入字元
-        unsigned int read_byte = mmio_read(AUX_MU_IO_REG);
-        read_byte = read_byte & AUX_CHAR_MASK; // 只取資料的低 8 bits
-        char c = (char)read_byte;
-        rx_buffer[rx_tail] = c;
-        rx_tail = (rx_tail + 1) % MAX_BUFFER_SIZE;
+        // RX 已在上面的 LSR-driven 區塊處理
     }
     
     if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
@@ -153,195 +218,43 @@ void uart_interrupt_handler()
         {
             char c = tx_buffer[tx_head];
             tx_head = (tx_head + 1) % MAX_BUFFER_SIZE;
-            mmio_write(AUX_MU_IO_REG, c);
+            mmio_write(uart_reg_info.aux_mu_io_reg, c);
         }
         else
         {
             // 寫出時是寫出完成觸發中斷，因此若無東西可寫需清除 TX 中斷狀態，避免重複觸發
-            unsigned int ier = mmio_read(AUX_MU_IER_REG);
+            unsigned int ier = mmio_read(uart_reg_info.aux_mu_ier_reg);
             ier &= ~AUX_MU_IER_TX_ENABLE;
-            mmio_write(AUX_MU_IER_REG, ier);
+            mmio_write(uart_reg_info.aux_mu_ier_reg, ier);
         }
     }
-}
-
-void uart_send(char c)
-{
-    //bit 5: TX 可寫
-    while ((mmio_read(AUX_MU_LSR_REG) & AUX_TX_FIFO_EMPTY) == 0)
-    {
-        asm volatile("nop");
-    }
-    //寫入資料
-    mmio_write(AUX_MU_IO_REG, c);
-}
-
-void uart_puts(const char *s)
-{
-    while (*s != '\0')
-    {
-        //換行字元前先加上回車字元
-        if (*s == '\n')
-        {
-            uart_send('\r');
-        }
-
-        uart_send(*s++);
-    }
-}
-
-char uart_recv()
-{
-    while ((mmio_read(AUX_MU_LSR_REG) & AUX_RX_FIFO_EMPTY) == 0)
-    {
-        asm volatile("nop");
-    }
-
-    //讀取字元資料只取低 8 bits
-    return (char)(mmio_read(AUX_MU_IO_REG) & AUX_CHAR_MASK);
-}
-
-unsigned int uart_recv_uint()
-{
-    unsigned int size = 0;
-
-    //因為python是Little Endian
-    for (int i = 0; i < 4; i++)
-    {
-        char tmp = uart_recv();
-        size |= (((unsigned char)tmp) << i * 8);
-    }
-
-    return size;
-}
-
-void uart_send_integer(int number)
-{
-    if (number == 0)
-    {
-        uart_send('0');
-        return;
-    }
-
-    if (number < 0)
-    {
-        uart_send('-');
-        number = -number;
-    }
-
-    char buffer[100];
-    unsigned int digit_size = 0;
-
-    while(number > 0)
-    {
-        buffer[digit_size] = (number % 10) + '0';
-        number /= 10;
-        digit_size += 1;
-    }
-
-    for (int i = digit_size - 1; i >= 0; i--)
-    {
-        uart_send(buffer[i]);
-    }
-}
-
-void uart_send_unsigned_long_integer(unsigned long number)
-{
-    if (number == 0)
-    {
-        uart_send('0');
-        return;
-    }
-
-    if (number < 0)
-    {
-        uart_send('-');
-        number = -number;
-    }
-
-    char buffer[100];
-    unsigned int digit_size = 0;
-
-    while(number > 0)
-    {
-        buffer[digit_size] = (number % 10) + '0';
-        number /= 10;
-        digit_size += 1;
-    }
-
-    for (int i = digit_size - 1; i >= 0; i--)
-    {
-        uart_send(buffer[i]);
-    }
-}
-
-void uart_send_decimal_part(int number, unsigned int digit_size)
-{
-    char buffer[100];
-    unsigned int has_number_size = 0;
-
-    while(number > 0)
-    {
-        buffer[has_number_size] = (number % 10) + '0';
-        number /= 10;
-        has_number_size += 1;
-    }
-
-    while (has_number_size < digit_size)
-    {
-        buffer[has_number_size] = '0';
-        has_number_size += 1;
-    }
-
-    for (int i = has_number_size - 1; i >= 0; i--)
-    {
-        uart_send(buffer[i]);
-    }
-}
-
-void uart_send_hex(unsigned int number)
-{
-    for (int hex_section = 28; hex_section >= 0; hex_section -= 4)
-    {
-        unsigned int hex_number = number & (0xF << hex_section);
-        hex_number = (hex_number >> hex_section);
-        char output;
-
-        if (hex_number >= 10)
-        {
-            output = 'A';
-            output = output + (hex_number - 10);
-        }
-        else
-        {
-            output = hex_number + '0';
-        }
-
-        uart_send(output);
-    }
-
-    uart_puts("\n");
 }
 
 void async_uart_send(char c)
 {
+    int next_tail = (tx_tail + 1) % MAX_BUFFER_SIZE;
+    while (next_tail == tx_head)
+    {
+        asm volatile("nop");
+    }
+
     bool queue_was_empty = (tx_head == tx_tail);
 
     tx_buffer[tx_tail] = c;
-    tx_tail = (tx_tail + 1) % MAX_BUFFER_SIZE;
+    tx_tail = next_tail;
 
-    if (queue_was_empty && (mmio_read(AUX_MU_LSR_REG) & AUX_TX_FIFO_EMPTY))
+    if (queue_was_empty && (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_TX_FIFO_EMPTY))
     {
         char first_byte = tx_buffer[tx_head];
         tx_head = (tx_head + 1) % MAX_BUFFER_SIZE;
-        mmio_write(AUX_MU_IO_REG, first_byte);
+        mmio_write(uart_reg_info.aux_mu_io_reg, first_byte);
     }
 
     if (tx_head != tx_tail)
     {
-        unsigned int ier = mmio_read(AUX_MU_IER_REG);
+        unsigned int ier = mmio_read(uart_reg_info.aux_mu_ier_reg);
         ier |= AUX_MU_IER_TX_ENABLE;
-        mmio_write(AUX_MU_IER_REG, ier);
+        mmio_write(uart_reg_info.aux_mu_ier_reg, ier);
     }
 
     return;
@@ -371,6 +284,17 @@ char async_uart_recv()
     char c = rx_buffer[rx_head];
     rx_head = (rx_head + 1) % MAX_BUFFER_SIZE;
     return c;
+}
+
+void async_uart_reset_rx()
+{
+    rx_head = 0;
+    rx_tail = 0;
+
+    while (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_RX_FIFO_EMPTY)
+    {
+        (void)mmio_read(uart_reg_info.aux_mu_io_reg);
+    }
 }
 
 unsigned int async_uart_recv_uint()

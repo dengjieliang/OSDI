@@ -155,10 +155,10 @@ bool CpioGetFileContext(void *file_header, char* file_name)
 
             for (int i = 0; i < file_context_size; i++)
             {
-                uart_send(*file_content_ptr);
+                async_uart_send(*file_content_ptr);
                 file_content_ptr++;
             }
-            uart_puts("\n");
+            async_uart_puts("\n");
             return true;
         }
         else
