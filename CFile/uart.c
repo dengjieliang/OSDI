@@ -41,12 +41,13 @@ static UartRegInfoT uart_reg_info;
 #define AUX_MU_IIR_INT_RX 0X04 // bit 2 = 1 → RX FIFO 中有資料可讀
 #define AUX_MU_IIR_INT_TX 0X02 // bit 1 = 1 → TX FIFO 可寫
 #define AUX_TX_FIFO_EMPTY (1 << 5) // 或 0x20，表示 TX FIFO 為空，可以寫入資料
-#define AUX_RX_FIFO_EMPTY 0X01 // 表示 RX FIFO 為空，沒有資料可讀
+#define AUX_RX_DATA_READY 0X01 // LSR bit0=1 表示 RX FIFO 有資料可讀
 #define AUX_MU_IER_RX_ENABLE 0X01 // Bit 0
 #define AUX_MU_IER_TX_ENABLE 0X02 // Bit 1
 #define AUX_CHAR_MASK 0xFF // 只取資料的低 8 bits讀取為CHAR傳回給CPU
 #define AUX_MINI_UART_DATA_TYPE 3 // 8-bit data
 #define AUX_BAUD_RATE_115200 270 // 設定傳送速度為 115200 baud rate
+#define UART_RX_PUMP_BUDGET 16 // 每次 IRQ 最多搬運的 RX bytes 數（避免 RX 長時間佔用 IRQ，保留 TX 公平性）
 
 #define GPPUD_SETUP_VALUE 0 // disable pull-up/down
 #define GPPUD_CLEAR_VALUE 0 // 清除 GPPUD 設定
@@ -67,9 +68,11 @@ static char tx_buffer[MAX_BUFFER_SIZE];
 static volatile int tx_head = 0;
 static volatile int tx_tail = 0;
 
-static void uart_rx_pump(void)
+// 將硬體 RX FIFO 中的資料搬到 software ring buffer
+// budget: 本次 IRQ 最多搬運的字節數，用於 RX/TX fairness
+static void uart_rx_pump(unsigned int budget)
 {
-    while (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_RX_FIFO_EMPTY)
+    while (budget > 0 && (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_RX_DATA_READY))
     {
         unsigned int read_byte = mmio_read(uart_reg_info.aux_mu_io_reg);
         char c = (char)(read_byte & AUX_CHAR_MASK);
@@ -82,6 +85,7 @@ static void uart_rx_pump(void)
 
         rx_buffer[rx_tail] = c;
         rx_tail = next_tail;
+        budget -= 1;
     }
 }
 
@@ -202,16 +206,21 @@ void uart_open_ier_reg()
 
 void uart_interrupt_handler()
 {
+    // IIR 是當下快照：可用來判斷這次 IRQ 主要來源
     unsigned int iir = mmio_read(uart_reg_info.aux_mu_iir_reg);
 
-    uart_rx_pump();
+    bool rx_iir_hit = ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_RX);
+    bool tx_iir_hit = ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX);
 
-    if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_RX)
+    // 不能只依賴 rx_iir_hit：IIR 讀完到分支判斷之間，新的 RX byte 仍可能到達。
+    // 因此用「rx_iir_hit || LSR data-ready」提高穩定性，避免延後讀取造成堆積。
+    if (rx_iir_hit || (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_RX_DATA_READY))
     {
-        // RX 已在上面的 LSR-driven 區塊處理
+        uart_rx_pump(UART_RX_PUMP_BUDGET);
     }
     
-    if ((iir & AUX_CLEAR_TX_RX_FIFO) == AUX_MU_IIR_INT_TX)
+    // TX 每次 IRQ 只送一個 byte；其餘交給下一次 TX IRQ 持續送
+    if (tx_iir_hit)
     {
         //寫出至螢幕
         if (tx_head != tx_tail)
@@ -284,17 +293,6 @@ char async_uart_recv()
     char c = rx_buffer[rx_head];
     rx_head = (rx_head + 1) % MAX_BUFFER_SIZE;
     return c;
-}
-
-void async_uart_reset_rx()
-{
-    rx_head = 0;
-    rx_tail = 0;
-
-    while (mmio_read(uart_reg_info.aux_mu_lsr_reg) & AUX_RX_FIFO_EMPTY)
-    {
-        (void)mmio_read(uart_reg_info.aux_mu_io_reg);
-    }
 }
 
 unsigned int async_uart_recv_uint()

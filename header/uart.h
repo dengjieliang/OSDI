@@ -20,7 +20,6 @@ void uart_send_hex(unsigned int number);
 void async_uart_send(char c);
 void async_uart_puts(const char *s);
 char async_uart_recv();
-void async_uart_reset_rx();
 unsigned int async_uart_recv_uint();
 void async_uart_send_integer(int number);
 void async_uart_send_unsigned_long_integer(unsigned long number);
