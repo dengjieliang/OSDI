@@ -1,9 +1,9 @@
-#include "../header/early_uart.h"
-#include "../header/uart.h"
-#include "../header/shell.h"
-#include "../header/dtb.h"
-#include "../header/fdtb.h"
-#include "../header/exception.h"
+#include "../Driver/early_uart.h"
+#include "../Driver/uart.h"
+#include "../Shell/shell.h"
+#include "../Board/dtb.h"
+#include "../Board/fdtb.h"
+#include "../Kernel/exception.h"
 
 CtxT dtb_ctx;
 
