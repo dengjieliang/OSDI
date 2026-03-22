@@ -1,7 +1,7 @@
 #ifndef MAILBOX_H
 #define MAILBOX_H
 
-#include "../header/common.h"
+#include "../Board/common.h"
 
 // Mailbox 外設相對於 MMIO_BASE 的偏移量 (BCM2837/BCM2711)
 #define MBOX_BASE_OFFSET 0xB880

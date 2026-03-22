@@ -1,6 +1,6 @@
-#include "../header/common.h"
-#include "../header/utils.h"
-#include "../header/string.h"
+#include "../Board/common.h"
+#include "../Lib/utils.h"
+#include "../Lib/string.h"
 
 static unsigned int makemask(int size, int shiftnumber);
 

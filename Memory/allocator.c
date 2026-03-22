@@ -1,5 +1,5 @@
-#include "../header/allocator.h"
-#include "../header/common.h"
+#include "../Memory/allocator.h"
+#include "../Board/common.h"
 
 extern char __bss_end;
 

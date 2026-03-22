@@ -1,9 +1,9 @@
 #ifndef FDTB_H
 #define FDTB_H
 
-#include "../header/common.h"
-#include "../header/string.h"
-#include "../header/dtb.h"
+#include "../Board/common.h"
+#include "../Board/dtb.h"
+#include "../Lib/string.h"
 
 #define MAX_MEM_REGIONS 256
 #define MAX_SEGMENT 256

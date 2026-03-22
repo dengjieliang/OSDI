@@ -1,5 +1,5 @@
-#include "../header/early_common.h"
-#include "../header/early_uart.h"
+#include "../Driver/early_uart.h"
+#include "../Board/early_common.h"
 
 
 #define AUX_BASE       (MMIO_BASE + 0x215000)

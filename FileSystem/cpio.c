@@ -1,8 +1,8 @@
-#include "../header/cpio.h"
-#include "../header/string.h"
-#include "../header/utils.h"
-#include "../header/uart.h"
-#include "../header/common.h"
+#include "../FileSystem/cpio.h"
+#include "../Lib/string.h"
+#include "../Lib/utils.h"
+#include "../Driver/uart.h"
+#include "../Board/common.h"
 
 typedef struct cpio_header
 {

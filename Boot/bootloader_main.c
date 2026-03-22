@@ -1,5 +1,5 @@
-#include "../header/early_common.h"
-#include "../header/early_uart.h"
+#include "../Board/early_common.h"
+#include "../Driver/early_uart.h"
 
 
 typedef void (*kernel_entry_t)(void *);

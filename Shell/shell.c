@@ -1,13 +1,13 @@
-#include "../header/common.h"
-#include "../header/uart.h"
-#include "../header/shell.h"
-#include "../header/string.h"
-#include "../header/mailbox.h"
-#include "../header/power_manager.h"
-#include "../header/time.h"
-#include "../header/cpio.h"
-#include "../header/fdtb.h"
-#include "../header/user_mode.h"
+#include "../Board/common.h"
+#include "../Driver/uart.h"
+#include "../Shell/shell.h"
+#include "../Lib/string.h"
+#include "../Driver/mailbox.h"
+#include "../Driver/power_manager.h"
+#include "../Driver/time.h"
+#include "../FileSystem/cpio.h"
+#include "../Board/fdtb.h"
+#include "../Kernel/user_mode.h"
 
 static bool reboot_lock = false;
 

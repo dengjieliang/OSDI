@@ -1,8 +1,8 @@
-#include "../header/uart.h"
-#include "../header/early_uart.h"
-#include "../header/time.h"
-#include "../header/fdtb.h"
-#include "../header/exception.h"
+#include "../Driver/uart.h"
+#include "../Driver/early_uart.h"
+#include "../Driver/time.h"
+#include "../Board/fdtb.h"
+#include "../Kernel/exception.h"
 
 static inline void mask_all_exceptions(void)
 {

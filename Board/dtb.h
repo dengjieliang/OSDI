@@ -1,7 +1,7 @@
 #ifndef DTB_H
 #define DTB_H
 
-#include "../header/common.h"
+#include "../Board/common.h"
 
 
 #define MAX_DEPTH 32

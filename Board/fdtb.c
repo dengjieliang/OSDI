@@ -1,6 +1,6 @@
-#include "../header/fdtb.h"
-#include "../header/utils.h"
-#include "../header/string.h"
+#include "../Board/fdtb.h"
+#include "../Lib/utils.h"
+#include "../Lib/string.h"
 
 #define AUX_MMIO_BASE_DEFAULT  (MMIO_BASE + 0x215000)
 #define UART_MMIO_BASE_DEFAULT (MMIO_BASE + 0x215040)

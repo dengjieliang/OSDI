@@ -1,5 +1,5 @@
-#include "../header/common.h"
-#include "../header/mailbox.h"
+#include "../Driver/mailbox.h"
+#include "../Board/common.h"
 
 #define BOARD_BUFFER_SIZE (7)
 #define MEMORY_BUFFER_SIZE (8)

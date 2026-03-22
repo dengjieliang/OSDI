@@ -1,7 +1,7 @@
 #ifndef CPIO_H
 #define CPIO_H
 
-#include "../header/common.h"
+#include "../Board/common.h"
 
 //獲取所有檔案名稱
 int CpioGetFilesHeaderName(void *file_header);

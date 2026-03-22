@@ -1,6 +1,6 @@
-#include "../header/time.h"
-#include "../header/fdtb.h"
-#include "../header/uart.h"
+#include "../Driver/time.h"
+#include "../Driver/uart.h"
+#include "../Board/fdtb.h"
 
 static unsigned long long get_system_timer_count();
 static unsigned long long get_system_timer_frequency();

@@ -1,7 +1,7 @@
-#include "../header/dtb.h"
-#include "../header/utils.h"
-#include "../header/string.h"
-#include "common.h"
+#include "../Board/common.h"
+#include "../Board/dtb.h"
+#include "../Lib/utils.h"
+#include "../Lib/string.h"
 
 #define FDT_BEGIN_NODE 0x00000001
 #define FDT_END_NODE 0x00000002

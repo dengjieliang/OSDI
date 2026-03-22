@@ -1,6 +1,6 @@
-#include "../header/common.h"
-#include "../header/uart.h"
-#include "../header/fdtb.h"
+#include "../Board/common.h"
+#include "../Board/fdtb.h"
+#include "../Driver/uart.h"
 
 #define EARLY_AUX_BASE       (0x3F000000UL + 0x215000UL)
 #define EARLY_AUX_MU_IO_REG  (EARLY_AUX_BASE + 0x40UL)

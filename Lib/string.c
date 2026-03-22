@@ -1,5 +1,5 @@
-#include "../header/string.h"
-#include "../header/common.h"
+#include "../Lib/string.h"
+#include "../Board/common.h"
 
 // 比較兩個字串是否相等
 int strcmp(const char* s1, const char* s2)

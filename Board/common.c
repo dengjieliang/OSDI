@@ -1,5 +1,5 @@
-#include "../header/common.h"
-#include "../header/fdtb.h"
+#include "../Board/common.h"
+#include "../Board/fdtb.h"
 
 #define MMIO_BASE_DEFAULT 0x3F000000UL
 #define GPIO_BASE_OFFSET  0x200000UL

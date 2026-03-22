@@ -1,7 +1,7 @@
 #ifndef PM_H
 #define PM_H
 
-#include "../header/common.h"
+#include "../Board/common.h"
 
 #define PM_PASSWORD (0x5A000000)    //Magic Password
 #define PM_RSTC (MMIO_BASE + 0x0010001C)
