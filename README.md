@@ -5,22 +5,23 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ## 0.1 目前可做什麼（Overview / What you can do now）
 
-- 目前可在 QEMU 上啟動 Bootloader，Bootloader 會先透過 UART 對 Host 輸出 `OSDI: Ready`，表示已就緒並等待載入 Kernel。
+- 目前可在 QEMU 上啟動 Bootloader；Bootloader 會先透過 `early_uart` 對 Host 輸出 `OSDI: Ready`，表示已就緒並等待載入 Kernel。
 - Host 端執行 `Python/send_kernel.py` 連線到 QEMU Serial Port（127.0.0.1:8888），並依協定送出 Kernel Size（Little Endian）與 `build/kernel8.img` 內容。
-- Bootloader 會把 Kernel 寫入 `KERNEL_LOAD_ADDRESS (0x80000)`，再以 Function Pointer 方式跳轉到 Kernel Entry Point。
-- Kernel 啟動後會先解析 DTB、安裝 EL1 例外向量表，再重新初始化 UART 並開啟 IRQ 路徑，印出 `Welcome to OSDI`，最後呼叫 `shell_main()` 進入互動模式。
-- 整體資料流為：先使用 `make all` 完成建置（產出 `build/bootloader.img` / `build/kernel8.img` / `initramfs.cpio`）→ 再以 `make qemu-gdb` 啟動 QEMU（GDB Server :1234 + Serial Server :8888）→ Host（send_kernel.py） → Bootloader（UART handshake + load + handoff DTB） → Kernel（parse DTB + install vectors + UART init） → Shell（互動輸入輸出）。
+- Bootloader 會把 Kernel 寫入 `KERNEL_LOAD_ADDRESS (0x80000)`，再以 Function Pointer 方式跳轉到 Kernel，並把 DTB 指標一併傳入。
+- Kernel 啟動後會先解析 DTB、同步共用 MMIO base、安裝 EL1 例外向量表，再重新初始化 mini UART 並開啟 IRQ 路徑，印出 `Welcome to OSDI`，最後呼叫 `shell_main()` 進入互動模式。
+- 目前 shell 的 UART 收發已改為 IRQ + ring buffer 模式；輸入會由 RX interrupt 放進 `rx_buffer`，輸出則由 TX interrupt 非同步排空 `tx_buffer`。
+- 整體資料流為：先使用 `make all` 完成建置（產出 `build/bootloader.img` / `build/kernel8.img` / `initramfs.cpio`）→ 再以 `make qemu-gdb` 或 VS Code task 啟動 QEMU（GDB Server :1234 + Serial Server :8888）→ Host（send_kernel.py） → Bootloader（UART handshake + load + handoff DTB） → Kernel（parse DTB + `common_init_from_dtb` + install vectors + UART IRQ init） → Shell（互動輸入輸出）。
 
 ## 0.2 建置與執行流程（Build & Run Pipeline）
 
-- Makefile：設定 aarch64-linux-gnu- 交叉編譯工具鏈，並建置 `build/bootloader.img`、`build/kernel8.img`，同時自動打包 `initramfs.cpio`（包含 `LabTest` 測試檔）。
-- Makefile Targets：提供 `make qemu` 啟動 QEMU 模擬；`make qemu-gdb` 啟動 QEMU 並開啟 GDB Server（:1234）與 Serial Server（:8888）。
+- Makefile：設定 `aarch64-linux-gnu-` 交叉編譯工具鏈，並建置 `build/bootloader.img`、`build/kernel8.img`，同時提供 `initramfs.cpio` 打包規則（內容來自 `LabTest`）。
+- Makefile Targets：提供 `make qemu` 啟動 QEMU 模擬；`make qemu-gdb` 啟動 QEMU 並開啟 GDB Server（:1234）與 Serial Server（:8888）；兩者皆會帶入 `bcm2710-rpi-3-b-plus.dtb`。
 - Linker Scripts：
   - `linker_boot.ld`：設定 Bootloader Entry Point 為 0x60000，並定義 BSS 與 Stack Top。
   - `linker_kernel.ld`：設定 Kernel Entry Point 為 0x80000，並定義 BSS 與 Stack Top。
 - VS Code：
-  - `tasks.json`：自動化 `make all` 與啟動 `make qemu-gdb`（並加上 pkill 避免舊 QEMU 佔用 Port）。
-  - `launch.json`：設定 GDB 連線至 :1234，並載入 `build/bootloader.elf` 符號表以便除錯。
+    - `tasks.json`：自動化 `make all` 與啟動 `make qemu-gdb`（並加上 `pkill` 與 port ready 檢查，避免舊 QEMU 佔用 Port）。
+    - `launch.json`：設定 GDB 連線至 :1234，並額外載入 `build/kernel8.elf`（base 0x80000）以便除錯。
 
 ## 0.3 開機交棒流程（Boot Chain）
 
@@ -33,16 +34,17 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     - context bridge：在例外入口保存/還原暫存器，轉交至 C handler（`el0_sync_handler_c` / `el0_irq_handler_c` / `el1_irq_handler_c` / `default_handler_dump_c`；由 `CFile/exception.c` 提供）。
 - handoff：跳轉至 C 語言入口（Bootloader / Kernel 皆以 `kernel_main` 作為 entry；Bootloader build 的 `kernel_main` 即 Bootloader 主流程）。
 - `CFile/bootloader_main.c`：
-  - UART init：初始化 Mini UART。
+    - UART init：初始化 early Mini UART（polling 版本）。
   - handshake：送出 `OSDI: Ready` 通知 Host 端可以開始傳輸。
   - load：接收 Kernel Size（4 bytes）與 Kernel image（byte-by-byte），寫入 0x80000。
-  - jump：使用 Function Pointer 方式跳轉至 Kernel Entry。
+    - jump：使用 Function Pointer 方式跳轉至 Kernel Entry，並保留 DTB 指標交給 Kernel。
 
 ## 0.4 Kernel 主流程（Kernel Core / Interactive Loop）
 
 - `CFile/kernel_main.c`：
-    - parse DTB：先呼叫 `InitialDtbCtx(&dtb_ctx)`，再用 `ReadDTBFile(dtb_addr, DtbCollectHandler, &dtb_ctx)` 解析 bootloader 傳入的 DTB。
-    - re-init UART：再次初始化 UART，並開啟 TX/RX 與 UART IRQ 路徑（`uart_init` / `uart_aux_mu_cntl_reg` / `uart_open_ier_reg`）。
+        - parse DTB：先呼叫 `InitialDtbCtx(&dtb_ctx)`，再用 `ReadDTBFile(dtb_addr, DtbCollectHandler, &dtb_ctx)` 解析 bootloader 傳入的 DTB。
+        - common init：呼叫 `common_init_from_dtb(&dtb_ctx)`，把共用 MMIO 設定同步到目前 DTB 解析結果。
+        - re-init UART：以 `uart_init_dynamic()` 再次初始化 UART，並開啟 TX/RX 與 UART IRQ 路徑（`uart_aux_mu_cntl_reg` / `uart_open_ier_reg`）。
     - install vectors：呼叫 `set_exception_vector_table()`，將 EL1 例外向量表安裝到 `VBAR_EL1`。
     - unmask IRQ：`msr daifclr, #0xf`。
     - print welcome：以 `async_uart_puts()` 印出 `Welcome to OSDI`。
@@ -51,11 +53,22 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 ## 0.5 核心硬體依賴（Drivers & Peripherals）
 
 - 目前最核心依賴：Mini UART（因為 Bootloader 載入流程、Kernel 輸出、Shell 互動、Host Tool 通訊都依賴 UART）。
+- `CFile/early_uart.c / header/early_uart.h`：
+    - 提供 Bootloader 階段的 polling UART I/O（`early_uart_send/recv/puts/recv_uint`）。
+    - 提供早期輸出 helper（`early_uart_send_integer/hex/decimal_part`）與 `early_uart_delay_cycles()`。
+    - 目前主要被 `bootloader_main.c`（Kernel 載入協定）與 `kernel_main.c` 的 DTB 失敗路徑使用。
+- `header/early_common.h`：
+    - 提供 Bootloader/early 階段固定 MMIO base（`0x3F000000`）與 `KERNEL_LOAD_ADDRESS`。
+    - 提供 `mmio_read/mmio_write` 與 GPIO 寄存器位址常數，供 `early_uart.c` 使用。
 - `CFile/uart.c / header/uart.h`：
-  - init：設定 GPIO14/15 為 ALT5、設定 Baud Rate（115200）、關閉 Flow Control。
-  - polling I/O：`uart_send()` 輪詢 TX FIFO、`uart_recv()` 輪詢 RX FIFO。
-    - irq + async I/O：`uart_interrupt_handler()` 搭配 `async_uart_*` 與 TX/RX ring buffer。
-  - helpers：提供 uart_puts、uart_send_hex、uart_recv_uint 等輔助函式。
+    - init：依 DTB 解析後的 MMIO base 設定 GPIO14/15 為 ALT5、設定 Baud Rate（115200）、關閉 Flow Control。
+    - irq + async I/O：`uart_interrupt_handler()` 搭配 `async_uart_*` 與 TX/RX ring buffer，作為 Kernel 階段主要 UART 收發模式。
+    - fairness：RX 端使用 `uart_rx_pump(budget)` 搬運資料，避免 RX 長時間壟斷 IRQ。
+    - helpers：提供 `async_uart_send_integer`、`async_uart_send_hex`、`async_uart_recv_uint` 等輔助函式。
+- `CFile/time.c / header/time.h`：
+    - 透過 Generic Timer 提供 timetick 輸出、core timer compare 設定與 IRQ unmask。
+- `CFile/fdtb.c / header/fdtb.h`：
+    - 負責把 DTB 中的 initrd、UART/AUX/GPIO 與 interrupt controller base 收集到 `dtb_ctx`。
 - （後續若再新增其他 driver/module）撰寫順序可採「被誰呼叫 → 提供什麼 API → 影響哪個功能」，以維持可讀性與依賴關係清晰。
 
 ## 0.6 Host 端工具（Host Tools）
@@ -64,13 +77,27 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
   - connection：以 socket 連線到 QEMU Serial Port（127.0.0.1:8888）。
   - loader protocol：等待 `OSDI: Ready` → 傳送 Kernel Size（Little Endian）→ 傳送 `build/kernel8.img` 檔案內容。
   - terminal emulator：使用 select 做非阻塞 I/O，同時監聽 socket（目標輸出）與 stdin（使用者輸入），並處理 UTF-8 decode。
+
+## 0.7 Early Boot 通訊與位址基礎（early_uart / early_common）
+
+- `early_common.h` 是 bootloader 早期階段的最小共用層：
+    - 定義 `KERNEL_LOAD_ADDRESS (0x80000)` 作為 kernel 載入位址。
+    - 定義固定 `MMIO_BASE` 與 GPIO/AUX 相關暫存器推導基礎。
+    - 提供 `mmio_read/mmio_write` inline helper。
+- `early_uart.c` 以 `early_common.h` 為基礎，完成 mini UART 的 polling 初始化與收發：
+    - `early_uart_init()`：設定 AUX MU、GPIO14/15（ALT5）、baud rate 115200。
+    - `early_uart_recv_uint()`：接收 4 bytes little-endian size，供 bootloader 載入協定使用。
+    - `early_uart_send_hex()`：回送 size 供 Host 端確認。
+- 與 kernel 階段的差異：
+    - early 路徑使用固定 MMIO base + polling I/O。
+    - kernel 路徑使用 DTB 解析結果 + IRQ/ring-buffer async I/O。
 # 1. 共同定義 (Common Definitions)
 
 ## `common.h`
 
 ### 檔案定位
 
-提供專案的**共用型別/巨集**與**MMIO（Memory-mapped I/O）**讀寫工具，並定義部分 Raspberry Pi（以 `MMIO_BASE` 為基準）的 GPIO 暫存器位址常數。
+提供 kernel 階段的**共用型別/巨集**與**動態 MMIO（Memory-mapped I/O）**讀寫工具。`MMIO_BASE` 與 GPIO base 並非固定常數，而是由 `common_mmio` 在 runtime 決定（預設值可被 DTB 覆蓋）。
 
 ### 目前提供的功能
 
@@ -87,22 +114,28 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - **常用巨集**
     
     - `ALIGN4(x)`：將 `x` 向上對齊到 4-byte boundary
+
+    - `ALIGN8(x)`：將 `x` 向上對齊到 8-byte boundary
         
     - `MAX_ARGS`：定義為 `16`
         
     - `MAX_STRING_SIZE`：定義為 `1024`
-        
-- **位址常數**
-    
-    - `KERNEL_LOAD_ADDRESS 0x80000`
-        
-    - `MMIO_BASE 0x3F000000`
-        
-    - GPIO 相關：
-        
-        - `GPIO_BASE (MMIO_BASE + 0x200000)`
-            
-        - `GPFSEL1`, `GPPUD`, `GPPUDCLK0`
+
+- **共用 MMIO 狀態與初始化介面**
+
+    - `typedef struct common_mmio_info { unsigned long mmio_base; unsigned long gpio_base; } CommonMmioInfoT;`
+
+    - `extern CommonMmioInfoT common_mmio;`
+
+    - `void common_init_from_dtb(struct ctx* dtb_ctx);`
+
+- **位址巨集（由 `common_mmio` 動態推導）**
+
+    - `MMIO_BASE (common_mmio.mmio_base)`
+
+    - `GPIO_BASE (common_mmio.gpio_base)`
+
+    - `GPFSEL1`, `GPPUD`, `GPPUDCLK0`
             
 - **MMIO 讀寫 helper（inline）**
     
@@ -114,8 +147,72 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 ### 目前的限制/假設（就現況描述）
 
 - `bool/true/false/ALIGN4/MAX_ARGS/MAX_STRING_SIZE` 僅在 **非 C++** 時定義；若某些編譯單元以 C++ 編譯，這些符號在該單元可能不存在（取決於你的 include 與編譯設定）。
-    
-- `MMIO_BASE` 固定為 `0x3F000000`（適用情境取決於你的硬體/平台設定；此檔案本身不做自動判斷）。
+
+- `MMIO_BASE` 實際值取決於 `common_mmio`；若尚未呼叫 `common_init_from_dtb()` 或 DTB 不完整，系統會沿用 `common.c` 的預設值。
+
+## `common.c`
+
+### 檔案定位
+
+實作 kernel 階段共用 MMIO base 的保存與初始化邏輯。根據 DTB 解析結果更新 `common_mmio`，讓各模組透過 `common.h` 的 `MMIO_BASE/GPIO_BASE` 巨集使用一致位址。
+
+### 相依性（就現況）
+
+- `../header/common.h`
+
+- `../header/fdtb.h`
+
+### 目前提供的功能（實作）
+
+#### 1) 預設 base 與全域狀態
+
+- 預設值：
+
+    - `MMIO_BASE_DEFAULT = 0x3F000000`
+
+    - `GPIO_BASE_OFFSET = 0x200000`
+
+    - `AUX_BASE_OFFSET = 0x215000`
+
+    - `IRQ_BASE_OFFSET = 0xB200`
+
+- 全域 `CommonMmioInfoT common_mmio` 初始為：
+
+    - `mmio_base = 0x3F000000`
+
+    - `gpio_base = 0x3F200000`
+
+#### 2) `void common_init_from_dtb(struct ctx* dtb_ctx)`
+
+- 功能：依 `dtb_ctx` 內容更新 `common_mmio`。
+
+- 更新優先序（就現況）：
+
+    1. 若 `have_gpio_reg` 為真：
+
+        - `gpio_base = dtb_ctx->gpio_mmio_base`
+
+        - `mmio_base = gpio_mmio_base - GPIO_BASE_OFFSET`
+
+    2. 否則若 `have_aux_reg` 為真：
+
+        - `mmio_base = dtb_ctx->aux_mmio_base - AUX_BASE_OFFSET`
+
+        - `gpio_base = mmio_base + GPIO_BASE_OFFSET`
+
+    3. 否則若 `interrupt_info.have_arm_ctrl_intc_base` 為真：
+
+        - `mmio_base = arm_ctrl_intc_base - IRQ_BASE_OFFSET`
+
+        - `gpio_base = mmio_base + GPIO_BASE_OFFSET`
+
+- 若 `dtb_ctx == NULL`，函式直接返回，不修改現有值。
+
+### 目前的限制/假設（就現況描述）
+
+- `common_init_from_dtb()` 只更新 `mmio_base/gpio_base` 兩個欄位；其他周邊（如 UART/AUX 寄存器細節）仍由對應 driver 自行處理。
+
+- 若 DTB 未提供可用節點，`common_mmio` 會保留預設值（0x3F000000 系列）。
 # 2. Mailbox 介面 (Mailbox Interface)
 
 ## `mailbox.h`
@@ -392,7 +489,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - 迴圈結束後回傳：`(unsigned char)s1_tmp - (unsigned char)s2_tmp`
     
 
-> 現況注意：此實作**已**在 `read_byte == 0` 時提前回傳 `0`，因此不會出現「未初始化的 s1_tmp/s2_tmp 被拿來回傳」的未定義行為（這點與你 README 內目前寫的現況注意不同，建議以此段更新）。
+> 現況注意：此實作**已**在 `read_byte == 0` 時提前回傳 `0`，因此不會出現「未初始化的 s1_tmp/s2_tmp 被拿來回傳」的未定義行為。
 
 #### `strcspn(const char *s, const char reject, int max_len)`
 
@@ -607,7 +704,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-提供 CPIO（initramfs）存取相關的**介面宣告**與一個預設的 initramfs 起始位址常數，供 kernel 其他模組呼叫來：
+提供 CPIO（initramfs）存取相關的**介面宣告**，供 kernel 其他模組呼叫來：
 
 - 列出 CPIO 內的檔名
     
@@ -616,15 +713,15 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 目前提供的功能
 
-- `#define FILE_HEADER 0x8000000`
-    
-    - 定義一個預期的 CPIO header 起始位址常數（作為呼叫端可用的預設值）。
-        
 - 函式宣告：
     
     - `int CpioGetFilesHeaderName(void *file_header);`
         
         - 以 `file_header` 為起點，逐筆走訪 CPIO entries，**輸出檔名**並回傳檔案數量（實際輸出格式由 `cpio.c` 決定）。
+
+    - `bool CpioGetFileData(void *file_header, char* file_name, void **out_data, unsigned long *out_size);`
+
+        - 搜尋指定檔案，若找到則回傳該檔案資料起點與大小（不直接輸出內容）。
             
     - `bool CpioGetFileContext(void *file_header, char* file_name);`
         
@@ -653,11 +750,11 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 - `../header/cpio.h`：對外 API 宣告
     
-- `../header/string.h`（你先前那版）：使用 `strncmp()`、`strlen()`
+- `../header/string.h`：使用 `strncmp()`、`strlen()`
     
 - `../header/utils.h`：使用 `hex2int()` 將 8-byte ASCII hex 欄位轉數值
     
-- `../header/uart.h`：使用 `uart_send()`、`uart_puts()`（以及其他 UART 輸出函式由外部提供）
+- `../header/uart.h`：使用 `async_uart_send()`、`async_uart_puts()`
     
 - `../header/common.h`：使用 `ALIGN4()` 做 4-byte 對齊
     
@@ -714,7 +811,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     - 回傳掃描到的 `file_count`
         
 
-> 現況注意（就目前輸出行為）：此函式只逐字輸出檔名，**不額外輸出分隔符（例如換行或空白）**；實際呈現效果取決於呼叫端是否自行補上格式化輸出。
+> 現況注意（就目前輸出行為）：此函式每個檔名輸出後會補一個換行（`"\n"`）。
 
 ---
 
@@ -752,9 +849,9 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
                 
         3. 輸出內容：
             
-            - 逐 byte 輸出 `file_context_size` bytes（`uart_send(*file_content_ptr)`）
+            - 逐 byte 輸出 `file_context_size` bytes（`async_uart_send(*file_content_ptr)`）
                 
-            - 最後 `uart_puts("\n")`
+            - 最後 `async_uart_puts("\n")`
                 
         4. 回傳 `true`
             
@@ -937,7 +1034,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-提供一個「DTB 走訪 callback 的上下文（context）」與數個 callback/工具函式，用來在 `ReadDTBFile()` 走訪 DTB 時**擷取特定節點資訊**（例如 `/chosen` 下的 initrd 範圍），並在走訪過程中**記錄每層 node 的 `#address-cells/#size-cells`** 等解析狀態，供後續裝置/記憶體資訊解讀使用。
+提供一個「DTB 走訪 callback 的上下文（context）」與數個 callback/工具函式，用來在 `ReadDTBFile()` 走訪 DTB 時**擷取特定節點資訊**（例如 `/chosen` 下的 initrd 範圍、`/soc` 下的 UART/AUX/GPIO/interrupt-controller base），並在走訪過程中**記錄每層 node 的 `#address-cells/#size-cells`** 等解析狀態，供後續裝置位址解讀使用。
 
 ### 相依性（就現況）
 
@@ -962,7 +1059,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
             
         - stdout 目標路徑：`stdout_target_segments[] / stdout_target_depth / have_stdout_target`
             
-        - UART `reg` 解析結果：`uart_mmio_base / uart_mmio_size / have_uart_reg`
+        - UART/AUX/GPIO `reg` 解析結果：`uart_mmio_base / uart_mmio_size / aux_mmio_base / gpio_mmio_base` 與對應 `have_*`
 
         - interrupt controller 解析結果：`interrupt_info.arm_local_intc_base / arm_ctrl_intc_base` 與 `have_*`
 
@@ -978,7 +1075,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
     - `void InitialDtbCtx(CtxT* dtb_ctx);`：初始化/清空 context
         
-    - `void DtbCollectHandler(...)`：同時處理 child-cells、`/chosen` initrd 與 `/soc/interrupt-controller@*`
+    - `void DtbCollectHandler(...)`：同時處理 child-cells、`/chosen` initrd 與 `/soc` 內的 UART/AUX/GPIO/interrupt-controller 節點
         
     - `void SaveChildCellAddr(...)`：遇到 `#address-cells` 時保存到 `child_addr_cells[depth-1]`
         
@@ -989,13 +1086,13 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     - `unsigned long Decode_Initrd_Addr(...)`：將 initrd property value（4/8 bytes）解讀成位址
         
 
-> 現況注意：`CtxT` 內宣告的 stdout/UART/RAM 等欄位，是否完整填值取決於對應 callback 是否實作並被註冊；就目前檔案內容來看，已明確實作的重點是 initrd、interrupt controller base 與 child cells 的保存。
+> 現況注意：`InitialDtbCtx()` 目前會先給 UART/AUX/GPIO 與 ARM control interrupt controller 一組預設 MMIO base；之後若 DTB 中找到對應節點，再以 DTB 解析結果覆蓋。
 
 ## `fdtb.c`
 
 ### 檔案定位
 
-實作 `fdtb.h` 宣告的 DTB 走訪輔助函式與 callback，提供「路徑比對」、「initrd 位址解碼」、「interrupt controller base 解析」、「context 初始化」以及「`#address-cells/#size-cells` 保存」等邏輯，讓呼叫端能在 `ReadDTBFile()` 的 callback 驅動流程中逐步累積解析結果。
+實作 `fdtb.h` 宣告的 DTB 走訪輔助函式與 callback，提供「路徑比對」、「initrd 位址解碼」、「UART/AUX/GPIO/interrupt controller base 解析」、「context 初始化」以及「`#address-cells/#size-cells` 保存」等邏輯，讓呼叫端能在 `ReadDTBFile()` 的 callback 驅動流程中逐步累積解析結果。
 
 ### 相依性（就現況）
 
@@ -1042,15 +1139,17 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 #### `void InitialDtbCtx(CtxT* dtb_ctx)`
 
-- 功能：將 `CtxT` 內所有欄位清 0 並把 `have_*` flags 設為 `false`
+- 功能：初始化 `CtxT` 內容，並對部分常用 peripheral 先填入預設 base
     
 - 行為包含：
     
-    - initrd range、stdout path segments、UART reg、mem regions
+    - initrd range、stdout path segments、RAM regions、`child_addr_cells[] / child_size_cells[]`
         
-    - `child_addr_cells[] / child_size_cells[]`
+    - 將 `uart_mmio_base`、`aux_mmio_base`、`gpio_mmio_base` 與 `arm_ctrl_intc_base` 先設成預設值
         
-    - `node_state[]`（含 `reg_entries[]` 與 `valid_reg_count`）
+    - 將 `arm_local_intc_base` 保留為未找到狀態，等待 DTB 解析補齊
+
+    - 清空 `node_state[]`（含 `reg_entries[]` 與 `valid_reg_count`）
         
 
 #### `void SaveChildCellAddr(...)` / `void SaveChildCellSize(...)`
@@ -1070,7 +1169,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 #### `void DtbCollectHandler(...)`
 
-- 功能：在 DTB traversal 過程中，同步收集 child-cells、initrd 與 interrupt-controller base
+- 功能：在 DTB traversal 過程中，同步收集 child-cells、initrd、UART/AUX/GPIO 與 interrupt-controller base
 
 - 行為（就現況）：
 
@@ -1086,12 +1185,13 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
         - `HandleChosenProps(...)`：擷取 `/chosen/linux,initrd-start` 與 `/chosen/linux,initrd-end`
 
-        - `HandleInterruptControllerNode(...)`：在 `/soc/interrupt-controller@*` 比對 `compatible`，並用 `reg` 寫入
-          `interrupt_info.arm_local_intc_base` / `interrupt_info.arm_ctrl_intc_base`
+        - `HandleSocPeripheralNode(...)`：在 `/soc` 節點下比對 `compatible`，並用 `reg` 寫入
+          `interrupt_info.arm_local_intc_base` / `interrupt_info.arm_ctrl_intc_base` /
+          `uart_mmio_base` / `aux_mmio_base` / `gpio_mmio_base`
 
-    - 解析 `reg` 時僅取 address 欄位（依 parent `#address-cells` 決定寬度）
+    - 解析 `reg` 時會依 parent 的 `#address-cells/#size-cells` 決定欄位寬度，並在必要時把 bus address 轉成 CPU MMIO base
 
-> 現況注意：`DtbCollectHandler()` 已處理 `/chosen` initrd 與 interrupt controller base；`stdout/UART/mem_regions` 等欄位仍屬預留或待後續擴充。
+> 現況注意：`DtbCollectHandler()` 目前的重點是 `/chosen`、`/soc/serial@*`、`/soc/aux@*`、`/soc/gpio@*` 與 `/soc/interrupt-controller@*`；`stdout_target_segments` 與 `mem_regions` 仍屬保留欄位。
 
 # 10. 系統計時器 (System Timer)
 ## `time.h`
@@ -1130,16 +1230,20 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 - 讀取 system counter（`cntpct_el0`）與頻率（`cntfrq_el0`）
 - 設定 core timer compare value（`cntp_tval_el0`）
-- 啟用 `cntp_ctl_el0` 並 unmask `CORE0_TIMER_IRQ_CTRL` 對應的 timer interrupt
+- 啟用 `cntp_ctl_el0` 並依 DTB 解析到的 ARM local interrupt controller base unmask 對應的 timer interrupt
 - 提供 timetick 輸出與「以 tick / 秒為單位」的 timer 啟用 API
 
 ### 相依性（就現況）
 
 - `../header/time.h`
     
+- `../header/fdtb.h`
+    
+    - 使用 `dtb_ctx.interrupt_info.arm_local_intc_base` 決定 local timer IRQ unmask 的 MMIO base
+
 - `../header/uart.h`
     
-    - 使用 `uart_send_integer()`、`uart_send()`、`uart_send_decimal_part()`
+    - 使用 `async_uart_send_integer()`、`async_uart_send()`、`async_uart_send_decimal_part()` 做 timetick 輸出
         
 
 ### 目前提供的功能（實作）
@@ -1171,7 +1275,9 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 #### 4) 內部 helper：`static inline void unmask_timer_interrupt()`
 
-- 以 MMIO 寫入 `CORE0_TIMER_IRQ_CTRL (0x40000040)` 為 `2`，開啟 core timer 對應 IRQ。
+- 先檢查 `dtb_ctx.interrupt_info.have_arm_local_intc_base`
+    
+- 若有找到 base，則對 `arm_local_intc_base + 0x40` 寫入 `2`，開啟 core timer 對應 IRQ。
 
 #### 5) 對外 API：`void get_timetick()`
 
@@ -1193,11 +1299,11 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
                 
     3. UART 輸出格式：
         
-        - 輸出整數秒：`uart_send_integer(timetick_integer_part)`
+        - 輸出整數秒：`async_uart_send_integer(timetick_integer_part)`
             
         - 輸出 `'.'`
             
-        - 輸出 4 位小數：`uart_send_decimal_part(decimal_part, 4)`
+        - 輸出 4 位小數：`async_uart_send_decimal_part(decimal_part, 4)`
 
 #### 6) 對外 API：`void set_core_timer_interrupt_tick(unsigned long long timer_count)`
 
@@ -1228,7 +1334,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 >
 > 1. `get_timetick()` 本身**不輸出換行**；顯示換行與否由呼叫端決定。
 > 2. `get_timetick()` 目前將結果暫存在 `int`（整數秒與小數），長時間運行可能受 `int` 位寬限制。
-> 3. 這個模組目前只負責「設定與開啟 timer」，IRQ 進來後的事件處理（例如重新設下一次 compare、清中斷來源）需由中斷 handler 流程另外實作。
+> 3. 這個模組目前只負責「設定與開啟 timer」；IRQ 進來後的 re-arm 與分派邏輯在 `exception.c` 的 `irq_routing()` 內處理。
 
 
 # 11. 簡易命令列介面 (Shell)
@@ -1274,18 +1380,18 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-提供互動式 shell（blocking UART I/O）：
+提供互動式 shell（async UART I/O）：
 
 - 顯示 prompt（含時間）
     
 - 接收一行輸入並進行字串切割（argc/argv）
     
-- 依命令表執行對應指令（hello/help/info/time/reboot/cancel/ls/cat/test_brk/test_svc/test_bad_read/test_user_mode）
+- 依命令表執行對應指令（hello/help/info/time/reboot/cancel/ls/cat/test_brk/test_svc/test_bad_read/test_user_mode/dtb_intc/fdtb）
     
 
 ### 內容概述
 
-此檔案實作互動式 shell（blocking UART I/O），核心流程為：
+此檔案實作互動式 shell（async UART I/O），核心流程為：
 
 1. 顯示開機訊息後進入無限迴圈（`shell_main()`）
 2. 每輪先印出 prompt：`[` + `get_timetick()` + `]` + `:shell$ `
@@ -1307,17 +1413,20 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `test_svc`：在 EL1 觸發 `svc #0`，預期進 current-EL sync 路徑（目前也會進 default dump）
 - `test_bad_read`：在 EL1 嘗試讀取無效位址，預期 data abort dump 後停住
 - `test_user_mode`：從 initramfs 讀取指定檔案起始位址，切換到 EL0 執行
+- `dtb_intc`：輸出 DTB 解析到的 interrupt controller base 與 diagnostics
+- `fdtb`：輸出目前 `dtb_ctx` 中的 initrd / UART / GPIO / interrupt controller 資訊
 
 現況注意（以程式碼行為為準）：
 
 - `shell_main()` 呼叫 `shell_input_line()` 時不使用回傳值，但因為 tokenization 是直接處理全域 `input_buffer`，所以流程仍成立。
 - `input_buffer` 固定 128 bytes：滿了之後仍會回顯輸入，但不再寫入 buffer。
 - `reboot` 與 `cancelReboot` 命令的鎖定機制已經同步，`cancelReboot` 命令可以正常解除由 `reboot` 命令啟用的鎖。
+- `test_user_mode` 目前會直接使用 `argv[1]` 作為檔名，呼叫端需自行確保有帶參數。
 ### 相依性（就現況）
 
-- `uart.h`：`uart_puts/uart_send/uart_recv/uart_send_hex` 等
+- `uart.h`：`async_uart_puts/async_uart_send/async_uart_recv/async_uart_send_hex` 等
     
-- `string.h`（你先前那版）：`strcmp()`
+- `string.h`：`strcmp()`
     
 - `mailbox.h`：board/memory request 與讀回（`prepare_*`, `mailbox_call`, `get_*`）
     
@@ -1363,6 +1472,8 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `test_user_mode`：讀取 initramfs 中指定檔案位址，啟用 core timer（1 秒）後切換至 EL0
 
 - `dtb_intc`：輸出 DTB 解析到的 interrupt controller base 與 diagnostics
+
+- `fdtb`：輸出 `dtb_ctx` 內目前已解析的 initrd / UART / AUX / GPIO / interrupt controller 資訊
     
 - 尾端 sentinel：`{NULL, NULL}`
     
@@ -1390,7 +1501,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     
     - `[` + `get_timetick()` + `]` + `:shell$ `
         
-- 輸入處理（blocking）：
+- 輸入處理（以 `async_uart_recv()` 從 RX ring buffer 取資料）：
     
     - Enter（`\r` 或 `\n`）：
         
@@ -1545,36 +1656,46 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-宣告 mini UART 的初始化與基本 I/O 介面，供 bootloader、kernel、shell 以及其他模組使用。
+宣告 Kernel 階段 mini UART 的初始化、IRQ 控制與一組 async UART 介面，供 kernel、shell 以及其他模組使用。
 
 ### 目前提供的功能（宣告）
 
-- 初始化
+- 初始化 / IRQ 控制
     
-    - `void uart_init();`：初始化 mini UART
+    - `void uart_init();`：初始化 mini UART（使用目前組好的 MMIO base）
         
-- 送出（blocking）
+    - `void uart_init_dynamic();`：先依 `dtb_ctx` 組好 MMIO base，再初始化 mini UART
+        
+    - `void uart_aux_mu_cntl_reg();`：開啟 TX/RX
+        
+    - `void uart_open_ier_reg();`：開啟 RX interrupt 並在 interrupt controller 啟用 AUX IRQ
+        
+    - `void uart_interrupt_handler();`：處理 UART RX/TX interrupt
+
+- async I/O
     
-    - `void uart_send(char c);`：送出單一字元
+    - `void async_uart_send(char c);`
         
-    - `void uart_puts(const char *s);`：送出字串（遇 `\n` 會額外送 `\r`）
+    - `void async_uart_puts(const char *s);`
         
-    - `void uart_send_integer(int number);`：送出十進位整數字串
+    - `char async_uart_recv();`
         
-    - `void uart_send_decimal_part(int number, unsigned int digit);`：送出固定寬度十進位數字（常用於小數部分）
+    - `unsigned int async_uart_recv_uint();`
         
-    - `void uart_send_hex(unsigned int number);`：送出 32-bit hex（固定 8 個 nibble）並換行
+    - `void async_uart_send_integer(int number);`
         
-- 接收（blocking）
-    
-    - `char uart_recv();`：接收單一字元
+    - `void async_uart_send_unsigned_long_integer(unsigned long number);`
         
-    - `unsigned int uart_recv_uint();`：接收 4 bytes，組成 `unsigned int`（little-endian）
+    - `void async_uart_send_decimal_part(int number, unsigned int digit);`
         
+    - `void async_uart_send_hex(unsigned int number);`
+
 - 延遲
     
     - `void delay_cycles(unsigned int time);`：以 busy-loop + `nop` 延遲
-        
+
+> 現況注意：`header/uart.h` 仍保留部分舊的 blocking UART 宣告，但目前 Kernel 與 shell 的實際路徑已經改用 `async_uart_*`。
+
 
 ---
 
@@ -1582,13 +1703,15 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-實作 Raspberry Pi 3 的 **mini UART（AUX MU）** 初始化、IRQ 啟用、blocking I/O 與 async ring-buffer I/O，並負責設定 GPIO14/15 為 mini UART 腳位。
+實作 Raspberry Pi 3 的 **mini UART（AUX MU）** 初始化、IRQ 啟用與 async ring-buffer I/O，並負責設定 GPIO14/15 為 mini UART 腳位。
 
 ### 相依性（就現況）
 
-- `common.h`：使用 `MMIO_BASE`、`GPFSEL1/GPPUD/GPPUDCLK0` 等 GPIO MMIO 位址，以及 `mmio_read/mmio_write`
+- `common.h`：使用 `GPFSEL1/GPPUD/GPPUDCLK0` 與 `mmio_read/mmio_write`
     
 - `uart.h`：對外 API 宣告
+
+- `fdtb.h`：使用 `dtb_ctx` 中解析出的 UART/AUX/interrupt controller base
     
 
 ---
@@ -1597,7 +1720,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 #### 1) mini UART 寄存器與 bit mask 定義
 
-- 以 `AUX_BASE (MMIO_BASE + 0x215000)` 推導出一組 AUX/MU 暫存器位址（`AUX_ENABLES`, `AUX_MU_IO_REG`, `AUX_MU_LSR_REG`, `AUX_MU_BAUD_REG` 等）。
+- 以 `UartRegInfoT` 保存由 DTB 組裝出的 `aux_base`、`uart_base`、`irq_base` 與各個 AUX/MU 暫存器位址。
     
 - 定義初始化與狀態輪詢所需的 bit mask，例如：
     
@@ -1609,146 +1732,88 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
         
     - TX 可寫條件（LSR bit5）：`AUX_TX_FIFO_EMPTY (1<<5)`
         
-    - RX 有資料條件（實作以 LSR bit0 判斷）：`AUX_RX_FIFO_EMPTY 0x01`（名稱如此，但實作是等 bit0 為 1 才讀）
+    - RX 有資料條件（LSR bit0）：`AUX_RX_DATA_READY 0x01`
         
     - 8-bit data：`AUX_MINI_UART_DATA_TYPE 3`
         
     - 115200 baud：`AUX_BAUD_RATE_115200 270`
-        
 
-#### 2) `void uart_init()`
+    - RX 搬運 budget：`UART_RX_PUMP_BUDGET 16`
+
+#### 2) `static void uart_assemble_registers(void)`
+
+**功能：根據 `dtb_ctx` 解析到的 base address，組裝目前 UART driver 實際使用的 MMIO 暫存器位址。**
+
+- `aux_base` 來自 `dtb_ctx.aux_mmio_base`
+    
+- `uart_base` 來自 `dtb_ctx.uart_mmio_base`
+    
+- `irq_base` 來自 `dtb_ctx.interrupt_info.arm_ctrl_intc_base`
+
+#### 3) `void uart_init()`
 
 **功能：初始化 mini UART 並設定 GPIO14/15 為 UART。**
 
 目前流程（依程式碼順序）：
 
-1. 啟用 mini UART（`AUX_ENABLES |= 1`）
+1. 啟用 mini UART
     
 2. 關閉 TX/RX（先停用收發以避免設定途中異常）
     
-3. 關閉中斷（`AUX_MU_IER_REG` 相關位元清除）
+3. 關閉中斷
     
-4. 關閉 flow control（`AUX_MU_MCR_REG = 0`）
+4. 關閉 flow control
     
-5. 清空 TX/RX FIFO（`AUX_MU_IIR_REG` 寫入 `AUX_CLEAR_TX_RX_FIFO`）
+5. 清空 TX/RX FIFO
     
-6. 設定資料格式為 8-bit（`AUX_MU_LCR_REG = 3`）
+6. 設定資料格式為 8-bit
     
-7. 設定 baud rate（`AUX_MU_BAUD_REG = 270`）
+7. 設定 baud rate（115200）
     
-8. 設定 GPIO pull-up/down（以 `GPPUD/GPPUDCLK0` 的標準序列）：
+8. 設定 GPIO pull-up/down（以 `GPPUD/GPPUDCLK0` 的標準序列）
     
-    - `GPPUD=0`、delay 150 cycles
-        
-    - `GPPUDCLK0` 設定 GPIO14/15、delay 150 cycles
-        
-    - 清 `GPPUD`、清 `GPPUDCLK0`
-        
-9. 設定 GPIO14/15 為 ALT5（mini UART）：
-    
-    - 讀 `GPFSEL1` → 清除對應 bits → 設定 ALT5
-        
-> 現況：`uart_init()` 不直接開啟 TX/RX；會由 `uart_aux_mu_cntl_reg()` 在 kernel_main 階段開啟。
+9. 設定 GPIO14/15 為 ALT5（mini UART）
 
-#### 3) `void uart_aux_mu_cntl_reg()`
+> 現況：`uart_init()` 不直接開啟 TX/RX；會由 `uart_aux_mu_cntl_reg()` 在 `kernel_main` 階段開啟。
+
+#### 4) `void uart_init_dynamic()`
+
+**功能：先呼叫 `uart_assemble_registers()`，再呼叫 `uart_init()`。**
+
+- 這是 Kernel 階段實際使用的初始化入口，確保 UART base 來自 DTB，而不是固定常數。
+
+#### 5) `void uart_aux_mu_cntl_reg()`
 
 **功能：開啟 mini UART 的 TX/RX（`AUX_MU_CNTL_REG |= 3`）。**
 
-#### 4) `void uart_open_ier_reg()`
+#### 6) `void uart_open_ier_reg()`
 
 **功能：開啟 UART RX interrupt，並在 interrupt controller 啟用 AUX IRQ。**
 
 - `AUX_MU_IER_REG |= AUX_MU_IER_RX_ENABLE`
-- `IRQ_ENABLE1 (MMIO_BASE + 0xB210)` 設定 bit29（AUX interrupt）
+- 對 `irq_enable1` 設定 bit29（AUX interrupt）
 
-#### 5) `void uart_interrupt_handler()`
+#### 7) `static void uart_rx_pump(unsigned int budget)`
+
+**功能：將硬體 RX FIFO 內的資料搬到 software ring buffer。**
+
+- 每次 IRQ 最多搬運 `budget` 個 bytes
+    
+- 若 ring buffer 已滿，會前移 `rx_head`，保留最新收到的資料
+
+#### 8) `void uart_interrupt_handler()`
 
 **功能：處理 UART RX/TX interrupt。**
 
-- RX interrupt：從 `AUX_MU_IO_REG` 讀一個 byte 寫入 `rx_buffer` ring buffer
-- TX interrupt：若 `tx_buffer` 有資料就送一個 byte；若已清空則關閉 `AUX_MU_IER_TX_ENABLE`
+- 先讀取 `IIR` 快照，判斷這次 IRQ 主要來源
     
-
-#### 6) `void uart_send(char c)`
-
-**功能：blocking 傳送單一字元。**
-
-- 輪詢 `AUX_MU_LSR_REG` 的 bit5（TX 可寫）直到可寫
+- RX 路徑：若 `rx_iir_hit`，或雖然 `IIR` 未顯示 RX 但 `LSR` 已顯示有資料，則執行 `uart_rx_pump(UART_RX_PUMP_BUDGET)`
     
-- 將 `c` 寫入 `AUX_MU_IO_REG`
-    
+- TX 路徑：若 `tx_iir_hit`，則每次 IRQ 只送一個 byte；若 `tx_buffer` 已清空則關閉 `AUX_MU_IER_TX_ENABLE`
 
-#### 7) `char uart_recv()`
+> 現況注意：這個 handler 採用「RX budget + TX 一次一個 byte」的 fairness 策略，而不是一次清空整個 RX FIFO 或整個 TX queue。
 
-**功能：blocking 接收單一字元。**
-
-- 輪詢 `AUX_MU_LSR_REG` 的 bit0 直到條件成立才讀取（程式碼以 `AUX_RX_FIFO_EMPTY` 這個 mask 判斷）
-    
-- 讀 `AUX_MU_IO_REG` 並用 `AUX_CHAR_MASK (0xFF)` 取低 8 bits，回傳 `char`
-    
-
-> 現況注意：巨集名稱寫作 `AUX_RX_FIFO_EMPTY`，但實際等待條件是「LSR bit0 變成 1 才讀」；就現有程式碼行為而言，它是在等待「可讀」狀態。
-
-#### 8) `void uart_puts(const char *s)`
-
-**功能：輸出 C-string（blocking），並將 `\n` 轉成 `\r\n`。**
-
-- 逐字送出直到 `'\0'`
-    
-- 若遇到 `'\n'`，會先送出 `'\r'` 再送出 `'\n'`
-    
-
-#### 9) `void uart_send_integer(int number)`
-
-**功能：以十進位輸出整數（blocking）。**
-
-- `number == 0` 時直接輸出 `'0'`
-    
-- 否則將每位數字（`number % 10`）逆序存入 buffer，再倒序輸出
-    
-
-> 現況行為：`number < 0` 時會先輸出 `'-'`，再將其轉為正值後輸出數字。
-
-#### 10) `void uart_send_decimal_part(int number, unsigned int digit_size)`
-
-**功能：輸出固定寬度的十進位數字（常用於小數部分補零）。**
-
-- 將 `number` 逐位拆解存入 buffer
-    
-- 若實際位數不足 `digit_size`，用 `'0'` 補到指定寬度
-    
-- 倒序輸出，確保輸出位數固定為 `digit_size`
-    
-
-> 現況行為：若 `number == 0`，會輸出 `digit_size` 個 `'0'`。
-
-#### 11) `void uart_send_hex(unsigned int number)`
-
-**功能：輸出 32-bit 十六進位（固定 8 個 hex digit，A–F 為大寫），並在結尾輸出換行。**
-
-- 從最高 nibble（bit28..31）到最低 nibble（bit0..3）逐 nibble 取值輸出
-    
-- `>= 10` 輸出 `'A' + (n-10)`，否則輸出 `'0'+n`
-    
-- 最後呼叫 `uart_puts("\n")`
-    
-
-#### 12) `unsigned int uart_recv_uint()`
-
-**功能：接收 4 bytes，組成 `unsigned int`（little-endian）。**
-
-- loop 4 次：
-    
-    - `tmp = uart_recv()`
-        
-    - `size |= ((unsigned char)tmp) << (i*8)`
-        
-- 回傳 `size`
-    
-
-> 現況假設：註解指出「python 是 Little Endian」，因此此函式預期 host 端以 little-endian 傳送 32-bit 整數。
-
-#### 13) Async I/O 系列（`async_uart_*`）
+#### 9) Async I/O 系列（`async_uart_*`）
 
 **功能：以 ring buffer + IRQ 的方式提供非阻塞風格 I/O。**
 
@@ -1756,9 +1821,9 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 - `async_uart_puts(...)`：逐字呼叫 `async_uart_send(...)`（含 `\n -> \r\n`）。
 - `async_uart_recv()`：從 `rx_buffer` 取字元（空時 busy wait）。
 - `async_uart_recv_uint()`：以 async recv 組 4-byte little-endian。
-- `async_uart_send_integer` / `async_uart_send_unsigned_long_integer` / `async_uart_send_decimal_part` / `async_uart_send_hex`：對應 blocking 輸出工具函式的 async 版本。
+- `async_uart_send_integer` / `async_uart_send_unsigned_long_integer` / `async_uart_send_decimal_part` / `async_uart_send_hex`：對應數字與 hex 輸出工具函式的 async 版本。
 
-#### 14) `void delay_cycles(unsigned int time)`
+#### 10) `void delay_cycles(unsigned int time)`
 
 **功能：以 `nop` busy-loop 延遲指定迭代數。**
 
@@ -1996,7 +2061,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
     - `default_handler_dump_c(...)`：輸出 `ESR/ELR/SPSR/FAR` 後無限迴圈停住。
     - `el0_sync_handler_c(...)`：輸出 syndrome 資訊；若 `EC == 0x15`（AArch64 SVC）則印出 `imm16` 後返回；其餘同步例外印出 `FAR_EL1` 並停住。
     - `irq_routing(...)`：先 mask 例外，再依 DTB 解析結果分派 IRQ 來源：
-        - local intc `+0x60`（Core0 Interrupt Source）bit1 → core timer 路徑（輸出 timetick 並重設下一次 2 秒）
+        - local intc `+0x60`（Core0 Interrupt Source）bit1 → core timer 路徑（重設下一次 2 秒，並輸出 `Core Timer Interrupt!`）
         - local intc bit8 + armctrl `+0x04` bit29 → AUX UART IRQ（呼叫 `uart_interrupt_handler()`）
     - `el0_irq_handler_c(...)` / `el1_irq_handler_c(...)` 皆委派到 `irq_routing(...)`。
 
@@ -2055,7 +2120,7 @@ Current Lab: Lab 2 - Booting Target Platform: Raspberry Pi 3 B+ (AArch64) Enviro
 
 ### 檔案定位
 
-Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握手並接收 Kernel Image，最後將 `x0` 暫存器中的 DTB 指標傳遞給 Kernel 並跳轉執行。
+Bootloader 的 C 語言主流程。負責初始化 **early mini UART**，與 Host 端握手並接收 Kernel Image，最後將 `x0` 暫存器中的 DTB 指標傳遞給 Kernel 並跳轉執行。
 
 ### 內容概述
 
@@ -2064,8 +2129,8 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
 - **入口與封裝**
   - `kernel_main(void *dtb)`：作為 bootloader 的 entry point，僅轉呼叫 `bootloader_main(dtb)`，避免把主流程散落在 entry 函式中。
 - **UART handshake 與載入協定**
-  - 初始化 Mini UART（`uart_init()`），輸出 `OSDI: Ready` 與等待提示字串。
-  - 透過 `uart_recv_uint()` 接收 4 bytes 的 kernel size，並用 `uart_send_hex()` 回送 size（便於 Host/除錯端確認）。
+    - 初始化 early mini UART（`early_uart_init()`），輸出 `OSDI: Ready` 與等待提示字串。
+    - 透過 `early_uart_recv_uint()` 接收 4 bytes 的 kernel size，並用 `early_uart_send_hex()` 回送 size（便於 Host/除錯端確認）。
 - **Kernel image 寫入**
   - 以 `KERNEL_LOAD_ADDRESS` 作為 kernel 目的位址，逐 byte 接收 `size` bytes 並寫入記憶體。
 - **跳轉與 DTB 轉交**
@@ -2073,9 +2138,9 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
   - 以 `__builtin_unreachable()` 表達「正常情況下不應返回」的控制流假設。
 ### 相依性（就現況）
 
-- `../header/common.h`：使用 `KERNEL_LOAD_ADDRESS`。
+- `../header/early_common.h`：使用 `KERNEL_LOAD_ADDRESS` 與 early MMIO 相關定義。
     
-- `../header/uart.h`：使用 UART 相關 I/O 函式。
+- `../header/early_uart.h`：使用 early UART 相關 I/O 函式。
     
 
 ### 目前提供的功能（實作）
@@ -2091,17 +2156,17 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
 
 1. **初始化 UART**
     
-    - 呼叫 `uart_init()`，確保 Bootloader 能與 Host 端通訊。
+    - 呼叫 `early_uart_init()`，確保 Bootloader 能與 Host 端通訊。
         
 2. **握手與接收 Size**
     
     - 輸出 `OSDI: Ready` 與提示訊息（`Bootloader: Waiting for Kernel size...`）。
         
-    - 透過 `uart_recv_uint()` 接收 Kernel Size，並用 `uart_send_hex()` 回送確認值。
+    - 透過 `early_uart_recv_uint()` 接收 Kernel Size，並用 `early_uart_send_hex()` 回送確認值。
         
 3. **接收 Kernel Image**
     
-    - 輸出提示訊息：`Bootloader: Waiting for Loding Kernel...`
+    - 輸出提示訊息：`Bootloader: Waiting for Loading Kernel...`
 
     - 將接收到的 bytes 逐一寫入 `KERNEL_LOAD_ADDRESS`（0x80000）。
         
@@ -2129,20 +2194,23 @@ Bootloader 的 C 語言主流程。負責初始化 Mini UART，與 Host 端握�
 
 ### 檔案定位
 
-Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲取硬體與 Initramfs 資訊），初始化周邊，並進入互動式 Shell。
+Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲取硬體、interrupt controller 與 Initramfs 資訊），初始化與 DTB 綁定的周邊設定，並進入互動式 Shell。
 
 ### 內容概述
 
-此檔案是 Kernel image 的主入口（`kernel_main(void *dtb_addr)`）：開機後先以 DTB 指標建立/解析裝置樹上下文（供後續 initrd / 硬體資訊使用），再初始化 UART 與 IRQ 路徑、安裝例外向量表，最後進入 shell 互動迴圈。
+此檔案是 Kernel image 的主入口（`kernel_main(void *dtb_addr)`）：開機後先以 DTB 指標建立/解析裝置樹上下文（供後續 initrd / 硬體資訊使用），再呼叫 `common_init_from_dtb()` 初始化共用硬體上下文，之後重新建立 UART 與 IRQ 路徑、安裝例外向量表，最後進入 shell 互動迴圈。
 
 - **DTB 解析與上下文初始化**
     - 程式碼最前段保留除錯鎖註解（`volatile int lock = 1; while(lock);`），需要時可取消註解用於 early boot 停住除錯。
   - 使用全域 `dtb_ctx` 作為 DTB 解析與狀態保存的 context。
   - `InitialDtbCtx(&dtb_ctx)`：初始化 context。
-  - `ReadDTBFile(dtb_addr, DtbCollectHandler, (void*)&dtb_ctx)`：解析 DTB blob，並透過 callback（`DtbCollectHandler`）處理 DTB 內與 initrd 相關的節點/資訊（實際行為取決於 dtb/fdtb 模組實作）。
-    - 若解析失敗（回傳 `false`），目前 `if` 分支為空（尚未做錯誤輸出/復原）。
+    - `ReadDTBFile(dtb_addr, DtbCollectHandler, (void*)&dtb_ctx)`：解析 DTB blob，並透過 callback（`DtbCollectHandler`）處理 `/chosen`、`/soc/serial`、`/soc/aux`、`/soc/gpio` 與 interrupt controller 節點資訊。
+        - 若解析失敗（回傳 `false`），會改用 `early_uart_init()` 印出錯誤訊息 `Failed to read DTB file.` 後直接返回。
+- **共用硬體上下文初始化**
+    - `common_init_from_dtb(&dtb_ctx)`：讓其他模組可使用 DTB 中解析出的 MMIO base。
 - **UART 與互動主迴圈**
-    - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
+        - 重新初始化 UART（保守作法：即使 bootloader 已開啟，kernel 仍再次設定硬體狀態）。
+                - 呼叫 `uart_init_dynamic()`：先依 `dtb_ctx` 組裝 UART/AUX/IRQ 暫存器位址，再重新初始化 mini UART。
         - 呼叫 `uart_aux_mu_cntl_reg()` 開啟 TX/RX。
         - 呼叫 `uart_open_ier_reg()` 開啟 RX interrupt 與 interrupt controller 的 AUX IRQ。
     - 呼叫 `set_exception_vector_table()` 安裝 EL1 例外向量基底（使用 `exception_table.S` 內的 `exception_vector_table`）。
@@ -2150,6 +2218,8 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
     - 以 `async_uart_puts()` 輸出 `Welcome to OSDI`。
   - 呼叫 `shell_main()` 進入互動模式，接收使用者輸入並輸出結果。
 ### 相依性（就現況）
+
+- `../header/early_uart.h`：DTB 解析失敗時的 early 錯誤輸出。
 
 - `../header/uart.h`：UART 初始化與輸出。
     
@@ -2166,7 +2236,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 
 #### 全域變數
 
-- `CtxT dtb_ctx;`：用於儲存 DTB 解析後的上下文資訊（如 initramfs 範圍）。
+- `CtxT dtb_ctx;`：用於儲存 DTB 解析後的上下文資訊，現況除了 initramfs 範圍，也包含 UART/AUX/GPIO 與 interrupt controller base。
 
 #### `void kernel_main(void* dtb_addr)`
 
@@ -2184,22 +2254,37 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
         
         - 遍歷 DTB 結構。
             
-        - 透過 `DtbCollectHandler` 抓取 `/chosen` initrd 與 `/soc/interrupt-controller@*` base。
+        - 透過 `DtbCollectHandler` 抓取 `/chosen` initrd、`/soc/serial`、`/soc/aux`、`/soc/gpio` 與 interrupt controller base。
             
         - 解析結果存於全域變數 `dtb_ctx` 中。
+
+    - 若解析失敗：
+
+        - 呼叫 `early_uart_init()`
+
+        - 以 `early_uart_puts()` 印出 `Failed to read DTB file.`
+
+        - 直接返回，不繼續進行 kernel 初始化
             
-3. **重新初始化 UART 與中斷路徑**
+3. **初始化 DTB 綁定的共用硬體資訊**
+
+    - 呼叫 `common_init_from_dtb(&dtb_ctx)`，讓其他模組可使用 DTB 解析出的 MMIO base。
+
+4. **重新初始化 UART 與中斷路徑**
     
-    - 呼叫 `uart_init()` 確保硬體狀態（雖然 Bootloader 已開過，但重設以保險）。
+    - 呼叫 `uart_init_dynamic()`，先組裝目前 UART driver 實際使用的暫存器位址，再初始化 mini UART。
+
     - 呼叫 `uart_aux_mu_cntl_reg()` 開啟 TX/RX。
+
     - 呼叫 `uart_open_ier_reg()` 開啟 RX interrupt + AUX IRQ。
 
-4. **安裝例外向量表與開啟 IRQ**
+5. **安裝例外向量表與開啟 IRQ**
 
     - 呼叫 `set_exception_vector_table()`，將 EL1 的 `VBAR_EL1` 指向 `exception_table.S` 內的 `exception_vector_table`。
+
     - 呼叫 `msr daifclr, #0xf` 解除 IRQ mask。
         
-5. **進入 Shell**
+6. **進入 Shell**
     
     - 以 `async_uart_puts()` 印出 `Welcome to OSDI`。
         
@@ -2210,7 +2295,9 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB（以獲
 > 
 > 1. 程式碼中保留了 `volatile int lock = 1; while(lock);` 的除錯鎖（目前被註解掉），若需 GDB attach 除錯 startup 流程時可啟用。
 > 
-> 2. Shell 的 `ls/cat`（以及 `test_user_mode`）目前已使用 `dtb_ctx.initrd_start` 作為 CPIO 起點；`cpio.h` 內的 `FILE_HEADER` 常數保留作為固定起點呼叫時可選的預設值。
+> 2. Kernel 階段目前不再直接呼叫固定 base 的 `uart_init()`；實際流程是 `uart_init_dynamic()` + `uart_aux_mu_cntl_reg()` + `uart_open_ier_reg()`。
+> 
+> 3. Shell 的 `ls/cat`（以及 `test_user_mode`）目前已使用 `dtb_ctx.initrd_start` 作為 CPIO 起點。
 
 
 # 16. Python 傳輸腳本 (Python Serial Script)
@@ -2423,6 +2510,8 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 - 自動從 `LabTest/` 來源產生並打包 `initramfs.cpio`（包含 `.S -> .o -> .bin` 的測試程式流程）
         
 - QEMU 以 `-kernel $(IMG_BOOT)`（現況為 `build/bootloader.img`）啟動，並以 `-initrd initramfs.cpio` 提供 initramfs
+
+- 啟動 QEMU 時額外帶入 `-dtb $(DTB_FILE)`，讓 kernel 端可從實際 DTB 收集硬體 base
     
 
 ### 目前提供的功能（內容）
@@ -2466,7 +2555,9 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
         
 - 將其餘 C 檔視為共用檔：
     
-    - `C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) $(C_EXCEPTION_SRC) CFile/shell.c, $(C_ALL))`
+    - `C_COMMON := $(filter-out $(C_BOOT_SRC) $(C_KERNEL_SRC) $(C_EXCEPTION_SRC) CFile/shell.c CFile/time.c, $(C_ALL))`
+
+    - 也就是說 `shell.c` 與 `time.c` 都不算 boot/kernel 共用模組，而是由 kernel 端顯式加入
         
 
 #### 3) object 清單與「boot.o 需置前」
@@ -2475,27 +2566,37 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     
     - `OBJ_COMMON_C := ...`（將 `C_COMMON` 映射到 `build/*.o`）
         
-- 共用 Assembly object（排除 `Assembly/boot.S`，因為 `boot.o` 需特別置前）：
+- 共用 Assembly object（排除 `Assembly/boot.S`、`Assembly/exception_table.S`、`Assembly/user_mode_entry.S`）：
     
-    - `OBJ_ASM := ... $(filter-out Assembly/boot.S, $(S_ALL)) ... + (s_ALL)`
+    - `OBJ_ASM_COMMON := ...`
 
-    - 現況包含 `Assembly/exception_table.S`，對應產生 `build/exception_table.o`
+    - `OBJ_ASM_KERNEL := build/exception_table.o build/user_mode_entry.o`
         
 - 定義 `BOOT_START_OBJ := $(BUILD_DIR)/boot.o`
 
 - 定義 `EXCEPTION_C_OBJ := $(BUILD_DIR)/exception.o`
+
+- 組合共用 Object 清單：
+
+    - `OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM_COMMON)`
+
+    - `OBJ_COMMON_BOOT := $(filter-out $(BUILD_DIR)/uart.o $(BUILD_DIR)/cpio.o,$(OBJ_COMMON_ALL))`
+
+    - `OBJ_COMMON_KERNEL := $(OBJ_COMMON_ALL)`
     
 - 最終兩組連結 object（現況邏輯）：
     
-    - `OBJS_FOR_BOOTLOADER := boot.o + 共用.o + exception.o + bootloader_main.o`
+    - `OBJS_FOR_BOOTLOADER := boot.o + boot 專用共用.o + bootloader_main.o`
         
-    - `OBJS_FOR_KERNEL := boot.o + 共用.o + exception.o + shell.o + kernel_main.o`
+    - `OBJS_FOR_KERNEL := boot.o + 共用.o + exception_table.o + user_mode_entry.o + exception.o + time.o + shell.o + kernel_main.o`
 
 - 現況補充（`exception_table.S` / `exception.c`）：
 
     - `Assembly/exception_table.S` 會呼叫 `default_handler_dump_c`、`el0_sync_handler_c`、`el0_irq_handler_c`、`el1_irq_handler_c`，這些符號由 `CFile/exception.c` 提供。
 
-    - 因為 `exception.c` 屬於「例外處理橋接」而非一般共用功能，`OBJS_FOR_BOOTLOADER` 與 `OBJS_FOR_KERNEL` 目前皆**顯式加入** `build/exception.o`，避免被 `C_COMMON` 的 filter 規則誤排除後造成 link error。
+    - 目前只有 `OBJS_FOR_KERNEL` 顯式加入 `build/exception.o`；bootloader 並不連結 `exception.o`。
+
+    - `OBJ_COMMON_BOOT` 額外排除了 `uart.o` 與 `cpio.o`，表示 bootloader 不直接重用 kernel 階段的 mini UART driver，也不需要 cpio 解析模組。
         
 
 #### 4) 產出檔案命名與 all/clean
@@ -2564,12 +2665,16 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
     - `-kernel $(IMG_BOOT)`
         
     - `-initrd initramfs.cpio`
+
+    - `-dtb $(DTB_FILE)`
         
     - `-display none`
         
     - `-serial null -serial tcp:127.0.0.1:8888,server`
         
 - `qemu-gdb`：同上，但加入：
+
+    - `-dtb $(DTB_FILE)`
     
     - `-S -s`（等待 gdb 連線、開啟 gdb server）
         
@@ -2585,6 +2690,8 @@ Host 端的 **Kernel Loader + 簡易終端機**工具：
 - QEMU 的 `-kernel` 只載入 `$(IMG_BOOT)`（`build/bootloader.img`）；`build/kernel8.img` 的存在主要供 host 工具透過 UART 傳送，或供你在其他流程使用（Makefile 本身僅負責把它建出來）。
     
 - `-initrd initramfs.cpio` 固定使用該檔名；現況 `make all` 會自動重建/打包此檔。
+
+- `qemu` / `qemu-gdb` 目前只依賴 `$(IMG_BOOT)` 與 `$(IMG_KERNEL)`，不會因為 `initramfs.cpio` 缺少而自動先重建該檔；若要確保 initramfs 為最新內容，仍應先執行 `make all`。
 
 # 18. 連結腳本 (Linker Scripts)
 ## `linker_boot.ld`
