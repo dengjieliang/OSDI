@@ -41,15 +41,19 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": false,
-      "cwd": "/home/marginal/osdi-wsl-starter/osdi-lab0",
-      "program": "/home/marginal/osdi-wsl-starter/osdi-lab0/build/Debug/outDebug",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/build/kernel8.elf",
       "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb-multiarch",
       "setupCommands": [
         {
           "description": "Enable pretty-printing for gdb",
           "text": "-enable-pretty-printing",
           "ignoreFailures": true
+        },
+        {
+          "text": "set architecture aarch64",
+          "ignoreFailures": false
         }
       ]
     }
