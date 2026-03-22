@@ -1,4 +1,4 @@
-#include "../Board/common.h"
+#include "../Lib/base.h"
 #include "../Driver/uart.h"
 #include "../Shell/shell.h"
 #include "../Lib/string.h"
@@ -74,7 +74,7 @@ char* shell_input_line()
     int buffer_index = 0;
     
     async_uart_puts("[");
-    get_timetick();
+    get_current_timetick_string();
     async_uart_puts("]");
     async_uart_puts(":");
     async_uart_puts("shell$ ");
@@ -229,7 +229,7 @@ static void cmd_get_timer(int argc, char* argv[])
     (void)argc; // 防止編譯警告
     (void)argv; // 防止編譯警告
 
-    get_timetick();
+    get_current_timetick_string();
     async_uart_puts("\n");
 }
 

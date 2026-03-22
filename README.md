@@ -51,12 +51,16 @@
 
 Kernel 階段的共用型別、巨集與 MMIO 讀寫工具。
 
-**檔案位置：** [Board/common.h](Board/common.h) / [Board/common.c](Board/common.c)
+**檔案位置：** [Board/common.h](Board/common.h) / [Board/common.c](Board/common.c) / [Lib/base.h](Lib/base.h)
 
 **主要內容：**
 - 基本常數與型別（`bool`, `NULL` 等）
 - 常用巨集（`ALIGN4`, `ALIGN8`, `MAX_ARGS` 等）
 - 動態 MMIO base 初始化（`common_init_from_dtb`）
+
+**目前分工：**
+- [Lib/base.h](Lib/base.h) 負責共用基礎定義（`NULL`、`bool`、`ALIGN4/ALIGN8`、`MAX_ARGS`、`MAX_STRING_SIZE`）
+- [Board/common.h](Board/common.h) / [Board/common.c](Board/common.c) 負責 board-level MMIO 介面與 `common_mmio` 初始化
 
 適合搭配文件閱讀：[Board/Board.md](Board/Board.md)
 

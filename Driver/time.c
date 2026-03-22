@@ -1,6 +1,7 @@
 #include "../Driver/time.h"
 #include "../Driver/uart.h"
 #include "../Board/fdtb.h"
+#include "../Board/common.h"
 
 static unsigned long long get_system_timer_count();
 static unsigned long long get_system_timer_frequency();
@@ -56,16 +57,32 @@ static inline void unmask_timer_interrupt()
     mmio_write(dtb_ctx.interrupt_info.arm_local_intc_base + 0x40, 2); // unmask timer interrupt
 }
 
-void get_timetick()
+void get_current_timetick(double* timetick)
 {
     unsigned long long timer_count = get_system_timer_count();
     unsigned long long timer_freq = get_system_timer_frequency();
-    int timetick_integer_part = timer_count / timer_freq;
-    int decimal_part = ((timer_count % timer_freq) * 10000) / timer_freq;
+    *timetick = (double)timer_count / (double)timer_freq;
+}
+
+void get_current_timetick_string()
+{
+    double timetick = 0;
+    get_current_timetick(&timetick);
+
+    int timetick_integer_part = (int)timetick;
+    double timetick_decimal_part_double = timetick - (double)timetick_integer_part;
+    int timetick_decimal_part = 0;
+
+    while (timetick_decimal_part_double > 0.000001 && timetick_decimal_part_double < 1.0)
+    {
+        timetick_decimal_part_double *= 10;
+    }
+
+    timetick_decimal_part = (int)timetick_decimal_part_double;
     
     async_uart_send_integer(timetick_integer_part);
     async_uart_send('.');
-    async_uart_send_decimal_part(decimal_part, 4);
+    async_uart_send_decimal_part(timetick_decimal_part, 4);
 }
 
 void set_core_timer_interrupt_tick(unsigned long long timer_count)

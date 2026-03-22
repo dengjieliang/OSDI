@@ -1,7 +1,6 @@
-#include "../Board/common.h"
+#include "../Lib/base.h"
 #include "../Board/dtb.h"
 #include "../Lib/utils.h"
-#include "../Lib/string.h"
 
 #define FDT_BEGIN_NODE 0x00000001
 #define FDT_END_NODE 0x00000002

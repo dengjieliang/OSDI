@@ -11,10 +11,30 @@
 
 ## 內容概述
 
+- `base.h`：提供全專案共用的基礎常數 / 型別 / 對齊與容量巨集。
 - `string.h` / `string.c`：提供字串比較、字元掃描與長度計算。
 - `utils.h` / `utils.c`：提供 `memcpy`、hex 轉換、bit reversal 與 byte-combine helper。
 
 ## 目前提供的功能
+
+## `base.h`
+
+### 檔案定位
+
+集中管理專案共用的基礎定義，作為 `common.h` 內 primitive macro/type 的重構遷移目標。
+
+### 目前提供的功能（宣告）
+
+- `NULL`
+- `bool` / `true` / `false`（非 C++）
+- `ALIGN4(x)`
+- `ALIGN8(x)`
+- `MAX_ARGS`
+- `MAX_STRING_SIZE`
+
+### 現況注意
+
+- 基礎定義已集中到 `base.h`，並完成第一波 include 切換；行為維持與切換前一致。
 
 ## `string.h`
 

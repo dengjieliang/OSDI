@@ -2,7 +2,7 @@
 #include "../Lib/string.h"
 #include "../Lib/utils.h"
 #include "../Driver/uart.h"
-#include "../Board/common.h"
+#include "../Lib/base.h"
 
 typedef struct cpio_header
 {

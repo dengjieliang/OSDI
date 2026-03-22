@@ -1,7 +1,7 @@
 #ifndef FDTB_H
 #define FDTB_H
 
-#include "../Board/common.h"
+#include "../Lib/base.h"
 #include "../Board/dtb.h"
 #include "../Lib/string.h"
 

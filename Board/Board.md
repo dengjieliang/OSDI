@@ -16,6 +16,7 @@
 ## 內容概述
 
 - `common.h` / `common.c`：提供 kernel 階段共用型別、巨集與動態 MMIO base。
+- `../Lib/base.h`：集中共用基礎定義（`NULL`、`bool`、`ALIGN4/8`、`MAX_*`），已作為各模組 include 的共同來源。
 - `early_common.h`：提供 Bootloader early 階段固定 MMIO base 與 `KERNEL_LOAD_ADDRESS`。
 - `dtb.h` / `dtb.c`：提供 callback 驅動式 DTB blob traversal。
 - `fdtb.h` / `fdtb.c`：提供 `dtb_ctx` 與收集 `/chosen`、UART、GPIO、interrupt controller 等節點資訊的 callback。
@@ -56,6 +57,7 @@
 
 - `bool/true/false` 僅在非 C++ 時定義。
 - `MMIO_BASE` 的實際值取決於 `common_mmio`；若未呼叫 `common_init_from_dtb()` 或 DTB 不完整，會沿用預設值。
+- primitive 定義已由 `base.h` 集中提供；`common.h` 目前聚焦在 MMIO 與 board-level 共用介面。
 
 ## `common.c`
 
