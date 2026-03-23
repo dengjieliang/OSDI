@@ -1,8 +1,7 @@
 #include "../Kernel/time_manager.h"
 #include "../Driver/time.h"
 #include "../Lib/base.h"
-#include "../Lib/string.h"
-#include "../Driver/uart.h"
+#include "../Kernel/exception.h"
 
 #define MAX_TIMERS 64
 
@@ -17,6 +16,7 @@ typedef struct timer_event
 
 // 靜態陣列，開機時因為在 .bss 區段，in_use 預設都會是 false (0)
 static timer_event_t timer_pool[MAX_TIMERS];
+static timer_event_t* timer_list_head = NULL; // 定時器事件鏈表的頭指標
 
 static timer_event_t* allocate_timer() 
 {
@@ -47,8 +47,31 @@ bool AddTaskToTimerManager(timer_callback_t task, char* message, unsigned long e
     }
 
     new_timer->callback = task;
-    strncpy(new_timer->message, message, strlen(message));
-    new_timer->message[sizeof(new_timer->message) - 1] = '\0'; // 確保字串是以 null 結尾的
+    new_timer->message = (char*)message;
     new_timer->trigger_tick = get_current_tick() + tansfer_seconds_to_ticks(executeAfterSeconds);
     new_timer->next = NULL;
+    new_timer->in_use = true;
+
+    mask_all_exceptions();
+
+    if (timer_list_head == NULL || new_timer->trigger_tick < timer_list_head->trigger_tick) 
+    {
+        new_timer->next = timer_list_head;
+        timer_list_head = new_timer;
+    } 
+    else 
+    {
+        timer_event_t* current = timer_list_head;
+        while (current->next != NULL && current->next->trigger_tick < new_timer->trigger_tick) 
+        {
+            current = current->next;
+        }
+        new_timer->next = current->next;
+        current->next = new_timer;
+    }
+
+    unmask_all_exceptions();
+    set_core_timer_interrupt_tick(new_timer->trigger_tick);
+
+    return true;
 }

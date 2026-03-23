@@ -48,7 +48,7 @@ OBJ_ASM_KERNEL := $(BUILD_DIR)/Kernel/exception_table.o $(BUILD_DIR)/Kernel/user
 
 # 組合共用 Object 清單
 OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM_COMMON)
-OBJ_COMMON_BOOT := $(filter-out $(BUILD_DIR)/Driver/uart.o $(BUILD_DIR)/FileSystem/cpio.o,$(OBJ_COMMON_ALL))
+OBJ_COMMON_BOOT := $(filter-out $(BUILD_DIR)/Driver/uart.o $(BUILD_DIR)/FileSystem/cpio.o $(BUILD_DIR)/Kernel/timer_manager.o,$(OBJ_COMMON_ALL))
 OBJ_COMMON_KERNEL := $(OBJ_COMMON_ALL)
 
 # 設定 Entry Point Object (boot.o 必須在最前面)
@@ -133,6 +133,11 @@ $(INITRAMFS_IMG): $(LABTEST_PACK_FILES)
 	cd $(LABTEST_DIR) && printf '%s\n' $(notdir $(LABTEST_PACK_FILES)) | cpio -o -H newc > ../$@
 
 # ---- 編譯 C 與 Assembly ----
+
+# Driver/time.c uses double, so it must not be built with -mgeneral-regs-only
+$(BUILD_DIR)/Driver/time.o: Driver/time.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	mkdir -p $(dir $@)

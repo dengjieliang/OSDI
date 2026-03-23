@@ -76,8 +76,7 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
     // Bit 1 (值為 2) 代表 CNTPNSIRQ (Core Timer Interrupt)
     if (irq_src & (1 << 1))
     {
-        // 先 re-arm，避免因為 IRQ 內輸出太慢導致重複觸發
-        set_core_timer_interrupt_second(2);
+        
 
         // IRQ 內只做最小輸出，避免阻塞太久
         early_uart_puts("Core Timer Interrupt!\n");

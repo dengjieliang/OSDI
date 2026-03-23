@@ -5,6 +5,7 @@
 #include "../Board/fdtb.h"
 #include "../Kernel/exception.h"
 #include "../Board/common.h"
+#include "time.h"
 
 CtxT dtb_ctx;
 
@@ -31,10 +32,12 @@ void kernel_main(void* dtb_addr)
     uart_aux_mu_cntl_reg();
     uart_open_ier_reg();
 
+    //初始化timer
+    core_timer_init();
+
 
     // 會直接吃.S檔案內的 exception_vector_table
     set_exception_vector_table();
-
     unmask_all_exceptions();
 
     async_uart_puts("\r\nWelcome to OSDI\r\n");

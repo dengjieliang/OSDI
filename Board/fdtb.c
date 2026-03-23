@@ -1,4 +1,5 @@
 #include "../Board/fdtb.h"
+#include "../Board/common.h"
 #include "../Lib/utils.h"
 #include "../Lib/string.h"
 
