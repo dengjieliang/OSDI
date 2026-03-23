@@ -161,7 +161,10 @@
 
 ### 目前提供的功能
 
-- `void get_timetick()`
+- `unsigned long long get_current_tick()`
+- `double get_current_second()`
+- `void get_current_second_string()`
+- `unsigned long long tansfer_seconds_to_ticks(unsigned long seconds)`
 - `void set_core_timer_interrupt_tick(unsigned long long timer_count)`
 - `void set_core_timer_interrupt_second(unsigned long second)`
 - `void core_timer_enable_tick(unsigned long tick)`
@@ -194,32 +197,47 @@
 - 檢查 `dtb_ctx.interrupt_info.have_arm_local_intc_base`
 - 若找到 base，對 `arm_local_intc_base + 0x40` 寫入 `2`
 
-#### 5) `void get_timetick()`
+#### 5) `unsigned long long get_current_tick()`
+
+- 回傳目前 `cntpct_el0` 的 raw tick 值
+
+#### 6) `double get_current_second()`
+
+- 讀取 `timer_count` 與 `timer_freq`
+- 以 `(double)timer_count / (double)timer_freq` 換算目前秒數
+
+#### 7) `void get_current_second_string()`
 
 - 讀取 `timer_count` 與 `timer_freq`
 - 計算整數秒與 4 位小數
 - 以 `async_uart_send_integer()`、`async_uart_send('.')`、`async_uart_send_decimal_part()` 輸出
 
-#### 6) `void set_core_timer_interrupt_tick(unsigned long long timer_count)`
+#### 8) `unsigned long long tansfer_seconds_to_ticks(unsigned long seconds)`
+
+- 讀取 `cntfrq_el0`
+- 以 `seconds * timer_freq` 換算對應 tick 數
+
+#### 9) `void set_core_timer_interrupt_tick(unsigned long long timer_count)`
 
 - 以 `msr cntp_tval_el0, %0` 設定 compare value
 
-#### 7) `void set_core_timer_interrupt_second(unsigned long second)`
+#### 10) `void set_core_timer_interrupt_second(unsigned long second)`
 
 - 以 `second * timer_freq` 換算 tick，再呼叫 `set_core_timer_interrupt_tick()`
 
-#### 8) `void core_timer_enable_tick(unsigned long tick)`
+#### 11) `void core_timer_enable_tick(unsigned long tick)`
 
 - 依序執行 `core_timer_enable()`、`set_core_timer_interrupt_tick(tick)`、`unmask_timer_interrupt()`
 
-#### 9) `void core_timer_enable_second(unsigned long second)`
+#### 12) `void core_timer_enable_second(unsigned long second)`
 
 - 依序執行 `core_timer_enable()`、`set_core_timer_interrupt_second(second)`、`unmask_timer_interrupt()`
 
 ### 現況注意
 
-- `get_timetick()` 本身不輸出換行。
-- `get_timetick()` 目前將輸出前的整數秒與小數暫存在 `int`。
+- `get_current_second_string()` 本身不輸出換行。
+- `get_current_second_string()` 會把秒數拆成整數與小數部分，再格式化成 4 位小數輸出。
+- `tansfer_seconds_to_ticks()` 函式名稱目前保留原始拼字，對外 API 也是這個名稱。
 - IRQ re-arm 與實際 routing 在 [Kernel/Kernel.md](../Kernel/Kernel.md) 的 `exception.c` 內處理。
 
 ## `uart.h`

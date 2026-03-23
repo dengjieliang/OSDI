@@ -10,7 +10,7 @@ typedef struct timer_event
 {
     unsigned long long trigger_tick;
     timer_callback_t callback; // 定時器到期後要執行的函式
-    char message[64]; // 定時器到期後要傳遞的訊息
+    char* message; // 定時器到期後要傳遞的訊息
     struct timer_event* next; // 指向下一個定時器事件的指標
     bool in_use; // 是否正在使用中
 } timer_event_t;
@@ -47,8 +47,8 @@ bool AddTaskToTimerManager(timer_callback_t task, char* message, unsigned long e
     }
 
     new_timer->callback = task;
-    
-    double current_tick = 0;
-    get_current_timetick(&current_tick);
-    //new_timer->trigger_tick = current_tick + SecondsToTicks(executeAfterSeconds);
+    strncpy(new_timer->message, message, strlen(message));
+    new_timer->message[sizeof(new_timer->message) - 1] = '\0'; // 確保字串是以 null 結尾的
+    new_timer->trigger_tick = get_current_tick() + tansfer_seconds_to_ticks(executeAfterSeconds);
+    new_timer->next = NULL;
 }

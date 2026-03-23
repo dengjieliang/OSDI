@@ -11,5 +11,6 @@ int strcmp(const char *s1, const char *s2);
 int strncmp(const char *s1, const char *s2, unsigned long read_byte);
 unsigned int strcspn(const char *s, const char reject, int max_len);
 unsigned long strlen(const char *s);
+char* strncpy();
 
 #endif

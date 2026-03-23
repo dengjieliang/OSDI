@@ -57,17 +57,24 @@ static inline void unmask_timer_interrupt()
     mmio_write(dtb_ctx.interrupt_info.arm_local_intc_base + 0x40, 2); // unmask timer interrupt
 }
 
-void get_current_timetick(double* timetick)
+unsigned long long get_current_tick()
 {
     unsigned long long timer_count = get_system_timer_count();
-    unsigned long long timer_freq = get_system_timer_frequency();
-    *timetick = (double)timer_count / (double)timer_freq;
+    return timer_count;
 }
 
-void get_current_timetick_string()
+double get_current_second()
 {
     double timetick = 0;
-    get_current_timetick(&timetick);
+    unsigned long long timer_count = get_system_timer_count();
+    unsigned long long timer_freq = get_system_timer_frequency();
+    timetick = (double)timer_count / (double)timer_freq;
+    return timetick;
+}
+
+void get_current_second_string()
+{
+    double timetick = get_current_second();
 
     int timetick_integer_part = (int)timetick;
     double timetick_decimal_part_double = timetick - (double)timetick_integer_part;
@@ -83,6 +90,12 @@ void get_current_timetick_string()
     async_uart_send_integer(timetick_integer_part);
     async_uart_send('.');
     async_uart_send_decimal_part(timetick_decimal_part, 4);
+}
+
+unsigned long long tansfer_seconds_to_ticks(unsigned long seconds)
+{
+    unsigned long long timer_freq = get_system_timer_frequency();
+    return seconds * timer_freq;
 }
 
 void set_core_timer_interrupt_tick(unsigned long long timer_count)

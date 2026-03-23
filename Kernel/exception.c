@@ -3,8 +3,9 @@
 #include "../Driver/time.h"
 #include "../Board/fdtb.h"
 #include "../Kernel/exception.h"
+#include "../Board/common.h"
 
-static inline void mask_all_exceptions(void)
+void mask_all_exceptions(void)
 {
     // daifset 的 immediate bit meaning (AArch64):
     // bit0 -> F (FIQ)
@@ -16,6 +17,24 @@ static inline void mask_all_exceptions(void)
     __asm__ volatile(
         "msr daifset, #0xf \n"
         "isb                \n"   // ensure the mask takes effect immediately
+        :   //No output
+        :   //No input
+        : "memory"  // prevent compiler reordering
+    );
+}
+
+void unmask_all_exceptions(void)
+{
+    // daifclr 的 immediate bit meaning (AArch64):
+    // bit0 -> F (FIQ)
+    // bit1 -> I (IRQ)
+    // bit2 -> A (SError)
+    // bit3 -> D (Debug)
+    //
+    // #0xf means clear all four masks (enable interrupts).
+    __asm__ volatile(
+        "msr daifclr, #0xf \n"
+        "isb                \n"   // ensure the unmask takes effect immediately
         :   //No output
         :   //No input
         : "memory"  // prevent compiler reordering

@@ -131,3 +131,8 @@ unsigned long strlen(const char *s)
 
     return length;
 }
+
+char* strncpy(const char *s1, const char *s2, unsigned long read_byte)
+{
+    
+}
