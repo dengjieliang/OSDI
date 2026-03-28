@@ -8,6 +8,7 @@
 #include "time.h"
 
 CtxT dtb_ctx;
+static bool kernel_banner_printed = false;
 
 void kernel_main(void* dtb_addr)
 {
@@ -40,7 +41,11 @@ void kernel_main(void* dtb_addr)
     set_exception_vector_table();
     unmask_all_exceptions();
 
-    async_uart_puts("\r\nWelcome to OSDI\r\n");
+    if (kernel_banner_printed == false)
+    {
+        async_uart_puts("\r\nWelcome to OSDI\r\n");
+        kernel_banner_printed = true;
+    }
     
     //獲取使用者輸入
     shell_main();

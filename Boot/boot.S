@@ -87,6 +87,13 @@ from_el2_to_el1:
     mov x0, 0x3c5
     msr spsr_el2, x0    /*選擇 「AArch64 狀態下的 EL1h 模式」*/
     msr elr_el2, lr
+
+    // CPACR_EL1.FPEN (bits 21:20) = 0b11 → 不 trap EL0/EL1 的 FPU/SIMD 存取
+    // 若不設此值，預設為 0b00，任何 double/float 指令都會觸發 EC=0x07 同步例外
+    mov x0, (3 << 20)
+    msr cpacr_el1, x0
+    isb
+
     eret
 
 .lalready_el1:

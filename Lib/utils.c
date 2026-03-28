@@ -1,4 +1,4 @@
-#include "../Board/common.h"
+#include "../Lib/base.h"
 #include "../Lib/utils.h"
 #include "../Lib/string.h"
 
@@ -62,6 +62,105 @@ unsigned long hex2UnsignedLong(char *hex, int n)
         {
             result += (hex[i] - '0');
         }
+    }
+
+    return result;
+}
+
+bool is_all_digits(const char* string)
+{
+    if (string == NULL || *string == '\0')
+    {
+        return false;
+    }
+
+    while (*string != '\0')
+    {
+        if (*string < '0' || *string > '9')
+        {
+            return false;
+        }
+
+        string += 1;
+    }
+
+    return true;
+}
+
+unsigned int aoti(char* string)
+{
+    unsigned int result = 0;
+    int digit_count = 0;
+
+    while (*string != '\0' && digit_count < 10) // 10 digits is the max for 32-bit unsigned int
+    {
+        if (*string >= '0' && *string <= '9')    
+        {
+            result = result * 10 + (*string - '0');
+            digit_count += 1;
+
+        }
+        else
+        {
+            break;
+        }
+        string += 1;
+    }
+
+    return result;
+}
+
+unsigned long strtoul(char* string)
+{
+    unsigned long result = 0;
+    int digit_count = 0;
+
+    while (*string != '\0' && digit_count < 20) // 20 digits is the max for 64-bit unsigned long
+    {
+        if (*string >= '0' && *string <= '9')    
+        {
+            result = result * 10 + (*string - '0');
+            digit_count += 1;
+
+        }
+        else
+        {
+            break;
+        }
+        string += 1;
+    }
+
+    return result;
+}
+
+double atof(const char* string)
+{
+    double result = 0.0;
+    double fraction_base = 0.1;
+    bool in_fraction = false;
+
+    while (*string != '\0')
+    {
+        if (*string == '.')
+        {
+            in_fraction = true;
+        }
+        else
+        {
+            int digit = *string - '0';
+
+            if (in_fraction)
+            {
+                result += ((double)digit * fraction_base);
+                fraction_base *= 0.1;
+            }
+            else
+            {
+                result = result * 10.0 + (double)digit;
+            }
+        }
+
+        string += 1;
     }
 
     return result;

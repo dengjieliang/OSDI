@@ -164,17 +164,16 @@
 - `unsigned long long get_current_tick()`
 - `double get_current_second()`
 - `void get_current_second_string()`
-- `unsigned long long tansfer_seconds_to_ticks(unsigned long seconds)`
+- `unsigned long long tansfer_seconds_to_ticks(double seconds)`
+- `void tansfer_ticks_to_seconds(unsigned long long ticks, unsigned long* second_integer_part, unsigned int* second_decimal_part_4digit)`
 - `void set_core_timer_interrupt_tick(unsigned long long timer_count)`
-- `void set_core_timer_interrupt_second(unsigned long second)`
-- `void core_timer_enable_tick(unsigned long tick)`
-- `void core_timer_enable_second(unsigned long second)`
+- `void core_timer_init()`
 
 ## `time.c`
 
 ### 檔案定位
 
-透過 `cntpct_el0`、`cntfrq_el0`、`cntp_tval_el0` 與 `cntp_ctl_el0` 實作 Generic Timer 讀取與啟用，並根據 DTB 中的 ARM local interrupt controller base 開啟 timer IRQ。
+透過 `cntpct_el0`、`cntfrq_el0`、`cntp_cval_el0` 與 `cntp_ctl_el0` 實作 Generic Timer 讀取與 compare 設定，並根據 DTB 中的 ARM local interrupt controller base 開啟 timer IRQ。
 
 ### 目前提供的功能（實作）
 
@@ -186,16 +185,14 @@
 
 - 以 `mrs %0, cntfrq_el0` 讀取計數器頻率
 
-#### 3) `static inline void core_timer_enable()`
+#### 3) `void core_timer_init()`
 
+- 先呼叫 `set_core_timer_interrupt_tick(~0ULL)`，避免 enable 後立即命中 compare
 - 設定 `cntp_ctl_el0`
-  - bit0 = 1
-  - bit1 = 0
-
-#### 4) `static inline void unmask_timer_interrupt()`
-
+  - bit0 = 1（enable）
+  - bit1 = 0（unmask）
 - 檢查 `dtb_ctx.interrupt_info.have_arm_local_intc_base`
-- 若找到 base，對 `arm_local_intc_base + 0x40` 寫入 `2`
+- 若找到 base，對 `arm_local_intc_base + 0x40` 寫入 `2`（unmask local timer interrupt）
 
 #### 5) `unsigned long long get_current_tick()`
 
@@ -208,36 +205,31 @@
 
 #### 7) `void get_current_second_string()`
 
-- 讀取 `timer_count` 與 `timer_freq`
+- 呼叫 `get_current_second()`
 - 計算整數秒與 4 位小數
 - 以 `async_uart_send_integer()`、`async_uart_send('.')`、`async_uart_send_decimal_part()` 輸出
 
-#### 8) `unsigned long long tansfer_seconds_to_ticks(unsigned long seconds)`
+#### 8) `unsigned long long tansfer_seconds_to_ticks(double seconds)`
 
 - 讀取 `cntfrq_el0`
-- 以 `seconds * timer_freq` 換算對應 tick 數
+- 以 `seconds * (double)timer_freq` 換算對應 tick 數
 
-#### 9) `void set_core_timer_interrupt_tick(unsigned long long timer_count)`
+#### 9) `void tansfer_ticks_to_seconds(...)`
 
-- 以 `msr cntp_tval_el0, %0` 設定 compare value
+- 讀取 `cntfrq_el0`
+- 輸出整數秒：`ticks / timer_freq`
+- 輸出小數四位：`(ticks % timer_freq) * 10000 / timer_freq`
 
-#### 10) `void set_core_timer_interrupt_second(unsigned long second)`
+#### 10) `void set_core_timer_interrupt_tick(unsigned long long timer_count)`
 
-- 以 `second * timer_freq` 換算 tick，再呼叫 `set_core_timer_interrupt_tick()`
-
-#### 11) `void core_timer_enable_tick(unsigned long tick)`
-
-- 依序執行 `core_timer_enable()`、`set_core_timer_interrupt_tick(tick)`、`unmask_timer_interrupt()`
-
-#### 12) `void core_timer_enable_second(unsigned long second)`
-
-- 依序執行 `core_timer_enable()`、`set_core_timer_interrupt_second(second)`、`unmask_timer_interrupt()`
+- 以 `msr cntp_cval_el0, %0` 設定 compare value（絕對 trigger tick）
 
 ### 現況注意
 
 - `get_current_second_string()` 本身不輸出換行。
 - `get_current_second_string()` 會把秒數拆成整數與小數部分，再格式化成 4 位小數輸出。
 - `tansfer_seconds_to_ticks()` 函式名稱目前保留原始拼字，對外 API 也是這個名稱。
+- `core_timer_init()` 只負責啟用 timer 與 unmask local timer interrupt；真正的 timer re-arm 由 timer manager / IRQ 路徑控制。
 - IRQ re-arm 與實際 routing 在 [Kernel/Kernel.md](../Kernel/Kernel.md) 的 `exception.c` 內處理。
 
 ## `uart.h`

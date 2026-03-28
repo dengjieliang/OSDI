@@ -134,10 +134,12 @@ unsigned long strlen(const char *s)
 
 char* strncpy(const char *s1, const char *s2, unsigned long read_byte)
 {
+    unsigned int src_len = strlen(s2);
+    unsigned int copy_len = (src_len < read_byte) ? src_len : read_byte;
     char* dest = (char*)s1;
     const char* src = s2;
 
-    for (unsigned long i = 0; i < read_byte; i++)
+    for (unsigned long i = 0; i < copy_len; i++)
     {
         dest[i] = src[i];
 

@@ -45,11 +45,12 @@
 
 ### 內容概述
 
-1. `shell_main()` 顯示開機訊息後進入無限迴圈
-2. 每輪先印出 prompt：`[` + `get_timetick()` + `]` + `:shell$ `
+1. `shell_main()` 進入無限迴圈，持續接收與執行命令
+2. 每輪先印出 prompt：`[` + `get_current_second_string()` + `]` + `:shell$ `
 3. `shell_input_line()` 讀入一行（支援 Enter / Backspace，寫入 `input_buffer[128]`）
 4. `split_command()` 以空白做 in-place tokenize
 5. `execute_command()` 依 `commands[]` 比對並執行對應 handler
+6. IRQ 事件到來時可透過 `shell_notify_async_event()` 觸發 prompt 重畫
 
 ### 目前提供的功能（實作）
 
@@ -71,12 +72,12 @@
 - `test_user_mode`
 - `dtb_intc`
 - `fdtb`
+- `setTimeout`
 
 並以 `{NULL, NULL}` 作為 sentinel 結尾。
 
 #### 2) `void shell_main()`
 
-- 先輸出 `\n\n=== RPi3 OS Booting... ===\n`
 - 進入無限迴圈：
   1. `shell_input_line()`
   2. `split_command(&argc, argv)`
@@ -85,7 +86,7 @@
 #### 3) `char* shell_input_line()`
 
 - prompt 輸出格式：
-  - `[` + `get_timetick()` + `]` + `:shell$ `
+  - `[` + `get_current_second_string()` + `]` + `:shell$ `
 - Enter（`\r` / `\n`）
   - 輸出 `\n`
   - 在 `input_buffer` 結尾補 `\0`
@@ -96,6 +97,12 @@
 - 其他字元
   - `async_uart_send(c)` 回顯
   - 若 buffer 未滿則寫入 `input_buffer`
+
+#### 3-1) `void shell_notify_async_event()` / `shell_redraw_prompt_if_needed(...)`
+
+- timer IRQ 路徑會呼叫 `shell_notify_async_event()` 設定重畫旗標
+- `shell_input_line()` 每圈檢查旗標
+- 若旗標被設置，先換行、重印 prompt，再把目前已輸入內容逐字回顯
 
 #### 4) `static void split_command(int* argc, char* argv[])`
 
@@ -134,7 +141,7 @@
 
 #### `cmd_get_timer`（`time`）
 
-- 呼叫 `get_timetick()`
+- 呼叫 `get_current_second_string()`
 - 補一個換行
 
 #### `cmd_reboot`（`reboot`）
@@ -176,12 +183,21 @@
 - `fdtb`
   - 輸出 `dtb_ctx` 中的 initrd / UART / AUX / GPIO / interrupt controller 資訊
 
+#### `cmd_set_timeout`（`setTimeout`）
+
+- 使用方式：`setTimeout CALLBACK [ARGS...] SECONDS`
+- `SECONDS` 支援非負十進位格式（例如 `2`、`0.5`、`1.25`）
+- 會將 callback 與參數註冊到 timer manager：
+  - `add_timer(callback, timeout_argc, &argv[1], after_seconds)`
+- 命令本身為 non-blocking，會立即返回 shell
+
 ## 現況注意
 
 - Shell 已不是最早期的 blocking UART 版本；目前主路徑依賴 `async_uart_*` 與 IRQ。
 - `reboot_lock` 會在 reboot 倒數期間限制大部分命令，只允許取消重開機流程繼續操作。
 - `input_buffer` 固定 128 bytes，滿了之後仍會回顯輸入，但不再寫入 buffer。
 - `shell_main()` 不使用 `shell_input_line()` 的回傳值，但因為 tokenization 直接處理全域 `input_buffer`，流程仍成立。
+- `setTimeout` 的 callback 名稱必須存在於 `commands[]`。
 
 ## 跨文件導讀
 

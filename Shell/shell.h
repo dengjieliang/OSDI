@@ -14,5 +14,6 @@ typedef struct Command
 void shell_main();
 void execute_command(int argc, char* argv[]);
 char* shell_input_line();
+void shell_notify_async_event();
 
 #endif

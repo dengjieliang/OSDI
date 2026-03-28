@@ -15,6 +15,7 @@
 - `kernel_main.c`：Kernel 啟動主線。
 - `exception_table.S`：EL1 向量表與例外入口 wrapper。
 - `exception.h` / `exception.c`：C 端 exception / IRQ handler。
+- `time_manager.h` / `timer_manager.c`：軟體計時器事件管理與 IRQ 到期回呼。
 - `user_mode_entry.S` / `user_mode.h`：最小 EL0 切換入口。
 
 ## 目前提供的功能
@@ -31,9 +32,10 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 - `ReadDTBFile(dtb_addr, DtbCollectHandler, &dtb_ctx)`：解析 bootloader 傳入的 DTB
 - `common_init_from_dtb(&dtb_ctx)`：同步共用 MMIO base
 - `uart_init_dynamic()`、`uart_aux_mu_cntl_reg()`、`uart_open_ier_reg()`：重新建立 kernel 階段 UART 與 IRQ 路徑
+- `core_timer_init()`：啟用 core timer 與 local timer IRQ line
 - `set_exception_vector_table()`：安裝 EL1 向量表
-- `msr daifclr, #0xf`：解除 IRQ mask
-- `async_uart_puts("Welcome to OSDI")`
+- `unmask_all_exceptions()`：解除 IRQ mask
+- `async_uart_puts("Welcome to OSDI")`（只印一次）
 - `shell_main()`：進入互動模式
 
 ### `void kernel_main(void* dtb_addr)`
@@ -47,9 +49,10 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
   - 直接返回
 5. 初始化 DTB 綁定的共用硬體資訊
 6. 重新初始化 UART 與中斷路徑
-7. 安裝例外向量表與開啟 IRQ
-8. 印出 `Welcome to OSDI`
-9. 進入 `shell_main()`
+7. 初始化 core timer
+8. 安裝例外向量表與開啟 IRQ
+9. 印出 `Welcome to OSDI`（一次）
+10. 進入 `shell_main()`
 
 ## `exception_table.S`
 
@@ -119,6 +122,8 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 
 ### 目前提供的功能
 
+- `void mask_all_exceptions(void)`
+- `void unmask_all_exceptions(void)`
 - `void set_exception_vector_table(void)`
 - `void default_handler_dump_c(unsigned long esr, unsigned long elr, unsigned long spsr)`
 - `void el0_sync_handler_c(unsigned long esr, unsigned long elr, unsigned long spsr, unsigned long *ctx)`
@@ -162,14 +167,65 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 - 先 mask 例外
 - 依 DTB 解析出的 base 分派 IRQ 來源：
   - local intc `+0x60` bit1 -> core timer 路徑
-    - 重設下一次 2 秒
-    - 輸出 `Core Timer Interrupt!`
+    - 呼叫 `timer_interrupt_router()` 處理到期事件與下一次 re-arm
+    - 呼叫 `shell_notify_async_event()` 通知 shell 重畫 prompt
   - local intc bit8 + armctrl `+0x04` bit29 -> AUX UART IRQ
     - 呼叫 `uart_interrupt_handler()`
+  - 其餘來源：輸出 unknown IRQ source 診斷
 
 #### `el0_irq_handler_c(...)` / `el1_irq_handler_c(...)`
 
 - 皆委派到 `irq_routing(...)`
+
+## `time_manager.h` / `timer_manager.c`
+
+### 檔案定位
+
+提供軟體計時器（software timer）管理：接收「幾秒後執行 callback」的任務，維護依觸發時間排序的事件佇列，並在 timer IRQ 中分派到期任務。
+
+### 目前提供的功能
+
+- `bool add_timer(CommandFunc callback, int argc, char** argv, double after_seconds)`
+- `void timer_interrupt_router()`
+
+### 目前提供的功能（實作）
+
+#### 內部資料結構
+
+- 以固定池 `timer_pool[MAX_TIMERS]`（`MAX_TIMERS = 64`）管理事件，避免動態配置
+- 每個事件節點保存：
+  - `trigger_tick`
+  - `scheduled_seconds`
+  - `callback`
+  - `argc`
+  - `message[MAX_ARGS][MAX_MESSAGE_LENGTH]`
+  - `next`
+  - `in_use`
+- 以 `timer_list_head` 維護按 `trigger_tick` 遞增排序的 linked list
+
+#### `add_timer(...)`
+
+1. 從 pool 配置可用節點
+2. 複製 callback / message / argc
+3. 以 `enqueue_tick + tansfer_seconds_to_ticks(after_seconds)` 計算 `trigger_tick`
+4. 在關中斷區間內（`mask_all_exceptions()`）插入排序 linked list
+5. 解除中斷後，呼叫 `set_core_timer_interrupt_tick(timer_list_head->trigger_tick)` 更新硬體 compare
+
+#### `timer_interrupt_router()`
+
+- 讀取目前 tick
+- 持續取出所有 `trigger_tick <= current_tick` 的事件並執行 callback
+- callback 參數以 `char* pass_argv[]` 形式轉交
+- 會輸出 `scheduled_delay=` 與 callback 輸出內容
+- 事件執行完回收到 pool（`in_use = false`）
+- 若佇列仍有事件，將 compare 設為新 head 的 `trigger_tick`
+- 若佇列已空，將 compare 設為 `~0ULL`（極大值）避免頻繁無效 IRQ
+
+### 現況注意
+
+- `time_manager.h` 與 `timer_manager.c` 的命名目前仍是混用狀態（`time_` / `timer_`）。
+- 目前 message 複製上限受 `MAX_ARGS` 與 `MAX_MESSAGE_LENGTH` 限制。
+- callback 執行在 IRQ 路徑內，若 callback 太重可能拉長 IRQ 佔用時間。
 
 ## `user_mode_entry.S`
 

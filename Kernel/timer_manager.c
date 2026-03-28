@@ -2,14 +2,19 @@
 #include "../Driver/time.h"
 #include "../Lib/base.h"
 #include "../Kernel/exception.h"
+#include "../Lib/string.h"
+#include "../Driver/uart.h"
+#include "../Shell/shell.h"
 
 #define MAX_TIMERS 64
 
 typedef struct timer_event
 {
     unsigned long long trigger_tick;
-    timer_callback_t callback; // 定時器到期後要執行的函式
-    char* message; // 定時器到期後要傳遞的訊息
+    double scheduled_seconds;
+    CommandFunc callback;
+    int argc;
+    char message[MAX_ARGS][MAX_MESSAGE_LENGTH];
     struct timer_event* next; // 指向下一個定時器事件的指標
     bool in_use; // 是否正在使用中
 } timer_event_t;
@@ -37,8 +42,9 @@ static void free_timer(timer_event_t* timer)
     timer->in_use = false; // 時間到了，把 flag 設回 false 就能回收再利用！
 }
 
-bool AddTaskToTimerManager(timer_callback_t task, char* message, unsigned long executeAfterSeconds)
+bool add_timer(CommandFunc callback, int argc, char** argv, double after_seconds)
 {
+    unsigned long long enqueue_tick = get_current_tick();
     timer_event_t* new_timer = allocate_timer();
 
     if (new_timer == NULL) 
@@ -46,9 +52,21 @@ bool AddTaskToTimerManager(timer_callback_t task, char* message, unsigned long e
         return false;
     }
 
-    new_timer->callback = task;
-    new_timer->message = (char*)message;
-    new_timer->trigger_tick = get_current_tick() + tansfer_seconds_to_ticks(executeAfterSeconds);
+    if (argv == NULL)
+    {
+        free_timer(new_timer);
+        return false;
+    }
+
+    for (int i = 0; i < argc; i++) 
+    {
+        strncpy(new_timer->message[i], argv[i], MAX_MESSAGE_LENGTH - 1);
+        new_timer->message[i][MAX_MESSAGE_LENGTH - 1] = '\0';
+    }
+    new_timer->callback = callback;
+    new_timer->argc = argc;
+    new_timer->scheduled_seconds = after_seconds;
+    new_timer->trigger_tick = enqueue_tick + tansfer_seconds_to_ticks(after_seconds);
     new_timer->next = NULL;
     new_timer->in_use = true;
 
@@ -70,8 +88,53 @@ bool AddTaskToTimerManager(timer_callback_t task, char* message, unsigned long e
         current->next = new_timer;
     }
 
+    set_core_timer_interrupt_tick(timer_list_head->trigger_tick);
     unmask_all_exceptions();
-    set_core_timer_interrupt_tick(new_timer->trigger_tick);
 
     return true;
+}
+
+void timer_interrupt_router()
+{
+    unsigned long long current_tick = get_current_tick();
+
+    while (timer_list_head != NULL && timer_list_head->trigger_tick <= current_tick) 
+    {
+        timer_event_t* expired_timer = timer_list_head;
+        timer_list_head = timer_list_head->next;
+
+        // scheduled_seconds already stores the delay in seconds, no need to convert
+        unsigned long executed_second_integer_part = (unsigned long)expired_timer->scheduled_seconds;
+        unsigned int executed_second_decimal_part_4digit = (unsigned int)((expired_timer->scheduled_seconds - (double)executed_second_integer_part) * 10000);
+
+        char* pass_argv[MAX_ARGS];
+        for (int i = 0; i < expired_timer->argc; i++)
+        {
+            pass_argv[i] = expired_timer->message[i];
+        }
+
+        async_uart_puts("\n[");
+        get_current_second_string();
+        async_uart_puts("] scheduled_delay=");
+        async_uart_send_unsigned_long_integer(executed_second_integer_part);
+        async_uart_send('.');
+        async_uart_send_decimal_part((int)executed_second_decimal_part_4digit, 4);
+        async_uart_puts(" message=");
+        expired_timer->callback(expired_timer->argc, pass_argv);
+        async_uart_puts("\n");
+
+        free_timer(expired_timer);
+    }
+
+    if (timer_list_head != NULL)
+    {
+        // 如果有，把硬體 Timer 的下一次觸發時間，設定為新 Head 的時間
+        set_core_timer_interrupt_tick(timer_list_head->trigger_tick);
+    }
+    else
+    {
+        // 如果 Queue 空了，可以選擇關閉 Timer 中斷 (Mask)，或是設定一個極大值
+        // 避免 Timer 一直狂叫
+        set_core_timer_interrupt_tick(~0ULL); // 設定為最大值 (永遠不到期)
+    }
 }

@@ -2,12 +2,14 @@
 #include "../Driver/uart.h"
 #include "../Shell/shell.h"
 #include "../Lib/string.h"
+#include "../Lib/utils.h"
 #include "../Driver/mailbox.h"
 #include "../Driver/power_manager.h"
 #include "../Driver/time.h"
 #include "../FileSystem/cpio.h"
 #include "../Board/fdtb.h"
 #include "../Kernel/user_mode.h"
+#include "../Kernel/time_manager.h"
 
 static bool reboot_lock = false;
 
@@ -24,9 +26,12 @@ static void cmd_test_el1_svc(int argc, char* argv[]);
 static void cmd_test_el1_bad_read(int argc, char* argv[]);
 static void cmd_test_el0_user_mode(int argc, char* argv[]);
 
+static CommandFunc compare_command(char* command);
 static void split_command(int* argc, char* argv[]);
 static void cmd_dtb_intc(int argc, char* argv[]);
 static void cmd_fdtb(int argc, char* argv[]);
+static void cmd_set_timeout(int argc, char* argv[]);
+static bool is_valid_seconds_format(const char* string);
 
 static const Command_t commands[] = 
 {
@@ -44,15 +49,46 @@ static const Command_t commands[] =
     {"test_user_mode", "Test User Mode", cmd_test_el0_user_mode},
     {"dtb_intc", "Show parsed interrupt controller base addresses", cmd_dtb_intc},
     {"fdtb", "Dump parsed DTB context (initrd, UART, GPIO, INTC bases)", cmd_fdtb},
+    {"setTimeout", "setTimeout CALLBACK [ARGS...] SECONDS (non-blocking)", cmd_set_timeout},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
 static char input_buffer[128];
+static volatile bool shell_need_redraw_prompt = false;
+
+static void shell_print_prompt()
+{
+    async_uart_puts("[");
+    get_current_second_string();
+    async_uart_puts("]");
+    async_uart_puts(":");
+    async_uart_puts("shell$ ");
+}
+
+void shell_notify_async_event()
+{
+    shell_need_redraw_prompt = true;
+}
+
+static void shell_redraw_prompt_if_needed(const char *current_input, int current_input_length)
+{
+    if (shell_need_redraw_prompt == false)
+    {
+        return;
+    }
+
+    shell_need_redraw_prompt = false;
+    async_uart_puts("\n");
+    shell_print_prompt();
+
+    for (int i = 0; i < current_input_length; i++)
+    {
+        async_uart_send(current_input[i]);
+    }
+}
 
 void shell_main()
 {
-    async_uart_puts("\n\n=== RPi3 OS Booting... ===\n"); //顯示已開機
-
     while (1)
     {
         shell_input_line();
@@ -72,17 +108,19 @@ void shell_main()
 char* shell_input_line()
 {
     int buffer_index = 0;
-    
-    async_uart_puts("[");
-    get_current_second_string();
-    async_uart_puts("]");
-    async_uart_puts(":");
-    async_uart_puts("shell$ ");
+    shell_print_prompt();
     
 
     while (true)
     {
-        char c = async_uart_recv();
+        shell_redraw_prompt_if_needed(input_buffer, buffer_index);
+
+        char c;
+        if (async_uart_try_recv(&c) == false)
+        {
+            asm volatile("nop");
+            continue;
+        }
         
         if ((c == '\r' || c == '\n') && buffer_index == 0)
         {
@@ -145,22 +183,36 @@ static void split_command(int* argc, char* argv[])
     }
 }
 
+static CommandFunc compare_command(char* command)
+{
+    CommandFunc callback = NULL;
+
+    for (int i = 0; commands[i].name != NULL; i++)
+    {
+        if (reboot_lock && strcmp("cancelReboot", command) != 0)
+        {
+            async_uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
+            return callback;
+        }
+
+        if (strcmp(commands[i].name, command) == 0)
+        {
+            callback = commands[i].func;
+            return callback;
+        }
+    }
+    return NULL;
+}
+
 // 在收到指令時遍歷所有命令，找到匹配的並執行
 void execute_command(int argc, char* argv[])
 {
-    for (int i = 0; commands[i].name != NULL; i++)
-    {
-        if (reboot_lock && strcmp("cancelReboot", argv[0]) != 0)
-        {
-            async_uart_puts("Rebooting... Please input 'Cancel Reboot' to abort.");
-            return;
-        }
+    CommandFunc callback = compare_command(argv[0]);
 
-        if (strcmp(commands[i].name, argv[0]) == 0)
-        {
-            commands[i].func(argc, argv);
-            return;
-        }
+    if (callback != NULL)
+    {
+        callback(argc, argv);
+        return;
     }
 
     const char *not_found_command_msg = "Command not found:";
@@ -468,4 +520,75 @@ static void cmd_fdtb(int argc, char* argv[])
         async_uart_puts(" (expect 0x3F00B200)\n");
     }
     else { async_uart_puts("NOT FOUND\n"); }
+}
+
+static void cmd_set_timeout(int argc, char* argv[])
+{
+    if (argc < 3)
+    {
+        async_uart_puts("Usage: setTimeout CALLBACK [ARGS...] SECONDS\n");
+        return;
+    }
+
+    if (is_valid_seconds_format(argv[argc - 1]) == false)
+    {
+        async_uart_puts("Error: SECONDS must be a non-negative decimal number\n");
+        return;
+    }
+
+    double after_seconds = atof(argv[argc - 1]);
+
+    int timeout_argc = argc - 2;
+    if (timeout_argc <= 0)
+    {
+        async_uart_puts("Usage: setTimeout CALLBACK [ARGS...] SECONDS\n");
+        return;
+    }
+
+    CommandFunc callback = compare_command(argv[1]);
+    if (callback == NULL)
+    {
+        async_uart_puts("Error: callback command not found\n");
+        return;
+    }
+
+    if (add_timer(callback, timeout_argc, &argv[1], after_seconds) == false)
+    {
+        async_uart_puts("Error: failed to register timeout event\n");
+    }
+}
+
+static bool is_valid_seconds_format(const char* string)
+{
+    if (string == NULL || *string == '\0')
+    {
+        return false;
+    }
+
+    int dot_count = 0;
+    int digit_count = 0;
+
+    while (*string != '\0')
+    {
+        if (*string == '.')
+        {
+            dot_count += 1;
+            if (dot_count > 1)
+            {
+                return false;
+            }
+        }
+        else if (*string >= '0' && *string <= '9')
+        {
+            digit_count += 1;
+        }
+        else
+        {
+            return false;
+        }
+
+        string += 1;
+    }
+
+    return digit_count > 0;
 }

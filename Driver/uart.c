@@ -295,6 +295,18 @@ char async_uart_recv()
     return c;
 }
 
+bool async_uart_try_recv(char *out_char)
+{
+    if (rx_head == rx_tail)
+    {
+        return false;
+    }
+
+    *out_char = rx_buffer[rx_head];
+    rx_head = (rx_head + 1) % MAX_BUFFER_SIZE;
+    return true;
+}
+
 unsigned int async_uart_recv_uint()
 {
     unsigned int size = 0;

@@ -21,6 +21,7 @@
 - **Linker Scripts** - Bootloader 與 Kernel 的記憶體佈局與連結位址
 - **Build Automation** - VS Code 自動化建置與 QEMU 啟停
 - **VS Code Configuration** - GDB 除錯組態、符號載入、連線設定
+- **Build Flags & ABI Notes** - `double` 與 `-mgeneral-regs-only` 的編譯一致性
 
 --- 
 
@@ -201,6 +202,7 @@ kernel 目前也採最小可用 section 佈局，讓 startup code 能直接使�
 - `Start QEMU (GDB Mode)` 不只是單純執行 `make qemu-gdb`，而是額外包了一層 port-ready 檢查，避免 VS Code 過早 attach 導致 handshake 不穩定。
 - `problemMatcher.background` 依賴 `__QEMU_START__` 與 `__QEMU_READY__` 兩個 marker；若未來更動 shell 指令時把 marker 拿掉，VS Code 背景 task 完成判定會失效。
 - `Build All` 的實際編譯行為仍以 [Makefile](Makefile) 為準；`tasks.json` 只是把它包成 VS Code 入口。
+- 目前 Makefile 對 `Driver/time.c`、`Kernel/timer_manager.c`、`Shell/shell.c`、`Lib/utils.c` 設有專用規則，會移除 `-mgeneral-regs-only` 以保持 `double` 相關 ABI 一致。
 
 ### 跨文件導讀
 
@@ -272,3 +274,14 @@ kernel 目前也採最小可用 section 佈局，讓 startup code 能直接使�
 
 - 想看「VS Code 如何穩定 attach 到 QEMU」：先看本檔，再看上方 `tasks.json` 章節。
 - 想看「為何需要 add-symbol-file kernel8.elf 0x80000」：本檔搭配上方 `linker_kernel.ld` 章節一起看。
+
+### 常見問題排查（GDB 連線 timeout）
+
+若 VS Code 出現 `-target-select remote 127.0.0.1:1234` timeout：
+
+1. 先執行 `Stop QEMU`
+2. 再執行 `Start QEMU (GDB Mode)`
+3. 確認 `1234` 與 `8888` 兩個 port 已 listening
+4. 再按 F5 attach
+
+常見原因是前一次非 GDB / 舊 QEMU 行程仍占用 `8888`，導致新的 `qemu-gdb` 無法啟動。

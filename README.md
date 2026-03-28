@@ -1,6 +1,6 @@
 # OSDI Lab - Bootloader & Kernel Development
 
-**專案名稱：** OSDI Lab 2  
+**專案名稱：** OSDI Labs (目前進度涵蓋 Lab 3 內容)  
 **目標平台：** Raspberry Pi 3 B+ (AArch64)  
 **開發環境：** WSL (Ubuntu) + QEMU + GDB
 
@@ -12,11 +12,13 @@
 
 ## 0.1 目前可做什麼
 
-詳見 [Board/Board.md](Board/Board.md)，概括如下：
+詳見各模組文件，概括如下：
 
 - Bootloader 啟動並等待 Kernel 載入
 - Host 端透過 Serial 協定（Python script）傳送 Kernel
 - Kernel 啟動後進入互動 Shell 模式
+- 已具備 exception / IRQ 路徑（EL1/EL0 sync + IRQ routing）
+- 已具備 software timer queue（one-shot multiplexing）與 `setTimeout` callback 排程
 
 ## 0.2 建置與執行流程
 
@@ -97,7 +99,7 @@ Kernel 階段的共用型別、巨集與 MMIO 讀寫工具。
 
 # 4. 字串處理函式庫 (String Library)
 
-基本的字串操作（strlen, strcpy, strcat 等）。
+基本的字串操作（`strcmp`、`strncmp`、`strcspn`、`strlen`、`strncpy`）。
 
 **檔案位置：** [Lib/string.h](Lib/string.h) / [Lib/string.c](Lib/string.c)
 
@@ -107,7 +109,7 @@ Kernel 階段的共用型別、巨集與 MMIO 讀寫工具。
 
 # 5. 通用工具 (Utilities)
 
-雜項工具函式（itoa, power, min/max 等）。
+雜項工具函式（`memcpy`、`hex2int`、`hex2UnsignedLong`、`strtoul`、`parse_seconds_to_double`、`reverseint`、`BigEndianToLittleEndian`、`CombineByte`）。
 
 **檔案位置：** [Lib/utils.h](Lib/utils.h) / [Lib/utils.c](Lib/utils.c)
 
@@ -157,11 +159,16 @@ DTB 解析後的回調邏輯與硬體資訊收集。
 
 # 10. 系統計時器 (System Timer)
 
-Generic Timer 與 Core Timer 的驅動與中斷支援。
+Generic Timer / Core Timer 與軟體計時器事件管理。
 
-**檔案位置：** [Driver/time.h](Driver/time.h) / [Driver/time.c](Driver/time.c)
+**檔案位置：** [Driver/time.h](Driver/time.h) / [Driver/time.c](Driver/time.c) / [Kernel/time_manager.h](Kernel/time_manager.h) / [Kernel/timer_manager.c](Kernel/timer_manager.c)
 
-適合搭配文件閱讀：[Driver/Driver.md](Driver/Driver.md)
+**目前重點：**
+- timer API：`add_timer(callback, argc, argv, double after_seconds)`
+- shell 命令：`setTimeout CALLBACK [ARGS...] SECONDS`（non-blocking）
+- `SECONDS` 支援非負十進位字串（例如 `2`、`0.5`、`1.25`）
+
+適合搭配文件閱讀：[Driver/Driver.md](Driver/Driver.md) 與 [Kernel/Kernel.md](Kernel/Kernel.md)
 
 ---
 
@@ -207,9 +214,9 @@ Bootloader 的 Kernel 載入與交棒邏輯。
 
 # 15. 作業系統核心主程式 (Kernel Main)
 
-Kernel 的初始化流程與主控制邏輯。
+Kernel 初始化流程與例外/IRQ 主控制邏輯。
 
-**檔案位置：** [Kernel/kernel_main.c](Kernel/kernel_main.c)
+**檔案位置：** [Kernel/kernel_main.c](Kernel/kernel_main.c) / [Kernel/exception.h](Kernel/exception.h) / [Kernel/exception.c](Kernel/exception.c)
 
 適合搭配文件閱讀：[Kernel/Kernel.md](Kernel/Kernel.md)
 
@@ -262,9 +269,17 @@ VS Code 的除錯組態與自動化任務。
 ## 快速開始
 
 1. **編譯專案：** `make all`
-2. **啟動 QEMU（GDB Mode）：** VS Code 中執行 `Build All` 與 `Start QEMU (GDB Mode)` tasks
-3. **開始 Debug：** VS Code 中選擇 `OSDI: Debug Lab2 (stable handshake)` 並 Launch
-4. **傳送 Kernel：** 在另一個終端執行 `python3 Tools/send_kernel.py`
+2. **啟動 QEMU（一般模式）：** `make qemu`（用於一般執行/觀察輸出）
+3. **啟動 QEMU（GDB 模式）：** VS Code 執行 `Start QEMU (GDB Mode)` task（或 `make qemu-gdb`）
+4. **開始 Debug：** VS Code 選擇 `OSDI: Debug Lab2 (stable handshake)` 並 Launch
+5. **傳送 Kernel：** 在另一個終端執行 `python3 Tools/send_kernel.py`
+
+### GDB 模式切換建議
+
+若剛跑過非 GDB 流程，要切回可除錯模式，建議固定順序：
+1. `Stop QEMU`
+2. `Start QEMU (GDB Mode)`
+3. 按 F5 進行 attach
 
 ## 關鍵文件導覽
 

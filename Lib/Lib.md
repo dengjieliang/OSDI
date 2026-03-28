@@ -49,6 +49,7 @@
 - `int strncmp(const char *s1, const char *s2, unsigned long read_byte);`
 - `unsigned int strcspn(const char *s, const char reject, int max_len);`
 - `unsigned long strlen(const char *s);`
+- `char* strncpy(const char *s1, const char *s2, unsigned long read_byte);`
 
 ### 現況注意
 
@@ -89,6 +90,12 @@
 - 若偵測到可能含 `\0` 的 word，再回到 byte 模式逐字確認
 - 若掃描到 `MAX_STRING_SIZE` 仍未遇到 `\0`，回傳上限內的長度
 
+#### `strncpy(const char *s1, const char *s2, unsigned long read_byte)`
+
+- 複製來源字串到目的緩衝區，最多 `read_byte` bytes
+- 實作會先以 `strlen(s2)` 計算來源長度，再決定 `copy_len`
+- 回傳目的位址
+
 ### 現況注意
 
 - `strlen()` 的 word-scan 假設 `unsigned long` 為 64-bit，AArch64 環境成立。
@@ -104,6 +111,11 @@
 
 - `void *memcpy(void *dest, const void *src, unsigned long n);`
 - `int hex2int(char *hex, int n);`
+- `unsigned long hex2UnsignedLong(char *hex, int n);`
+- `bool is_all_digits(const char* string);`
+- `unsigned int aoti(char* string);`
+- `unsigned long strtoul(char* string);`
+- `double parse_seconds_to_double(const char* string);`
 - `unsigned int reverseint(unsigned int number);`
 - `unsigned int BigEndianToLittleEndian(void* byte);`
 - `unsigned long long CombineByte(void* byte, unsigned int n);`
@@ -126,6 +138,30 @@
 - 將長度為 `n` 的字元序列視為 16 進位數字，轉成 `int`
 - 每輪先 `result *= 16`，再依字元範圍累加數值
 
+#### `hex2UnsignedLong(char *hex, int n)`
+
+- 將長度為 `n` 的 16 進位字串轉為 `unsigned long`
+
+#### `is_all_digits(const char* string)`
+
+- 驗證字串是否全部由十進位數字組成
+- `NULL` 或空字串會回傳 `false`
+
+#### `aoti(char* string)`
+
+- 將十進位字串轉為 `unsigned int`
+- 讀取時最多處理 10 位數
+
+#### `strtoul(char* string)`
+
+- 將十進位字串轉為 `unsigned long`
+- 讀取時最多處理 20 位數
+
+#### `parse_seconds_to_double(const char* string)`
+
+- 將非負十進位字串（可含一個 `.`）轉為 `double`
+- 以整數段與小數段累加方式解析
+
 #### `unsigned int reverseint(unsigned int number)`
 
 - 將 `number` 的 bit 序做反轉（bit-reversal）
@@ -144,7 +180,8 @@
 ### 現況注意
 
 - `memcpy()` 不做標準庫層級的效能最佳化，也不額外處理重疊區間。
-- `hex2int()` 沒有完整輸入合法性檢查。
+- `hex2int()` / `hex2UnsignedLong()` 沒有完整輸入合法性檢查。
+- `parse_seconds_to_double()` 預期輸入已先完成格式驗證。
 - `CombineByte()` 若未來要用 `n > 2`，建議重新檢查目前實作的指標推進行為是否符合預期。
 
 ## 跨資料夾導讀

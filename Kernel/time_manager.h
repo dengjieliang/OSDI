@@ -2,8 +2,11 @@
 #define TIME_MANAGER_H
 
 #include "../Lib/base.h"
+#include "../Shell/shell.h"
 
-typedef void (*timer_callback_t)(int, char*);
-bool AddTaskToTimerManager(timer_callback_t task, char* message, unsigned long executeAfterSeconds);
+#define MAX_MESSAGE_LENGTH 256
+
+bool add_timer(CommandFunc callback, int argc, char** argv, double after_seconds);
+void timer_interrupt_router();
 
 #endif

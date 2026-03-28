@@ -28,6 +28,9 @@ static unsigned long long get_system_timer_frequency()
 
 void core_timer_init()
 {
+    // 方案A: 先把 compare 設為最大值，確保 enable 後不會立刻觸發中斷
+    set_core_timer_interrupt_tick(~0ULL);
+
     // bit 0: enable bit
     // bit 1: interrupt mask bit
     unsigned long long ctl = (0 << 1) | (1 << 0);
@@ -86,10 +89,26 @@ void get_current_second_string()
     async_uart_send_decimal_part(timetick_decimal_part, 4);
 }
 
-unsigned long long tansfer_seconds_to_ticks(unsigned long seconds)
+unsigned long long tansfer_seconds_to_ticks(double seconds)
 {
     unsigned long long timer_freq = get_system_timer_frequency();
-    return seconds * timer_freq;
+    return (unsigned long long)(seconds * (double)timer_freq);
+}
+
+void tansfer_ticks_to_seconds(unsigned long long ticks, unsigned long* second_integer_part, unsigned int* second_decimal_part_4digit)
+{
+    unsigned long long timer_freq = get_system_timer_frequency();
+
+    if (second_integer_part != NULL)
+    {
+        *second_integer_part = (unsigned long)(ticks / timer_freq);
+    }
+
+    if (second_decimal_part_4digit != NULL)
+    {
+        unsigned long long remain_ticks = ticks % timer_freq;
+        *second_decimal_part_4digit = (unsigned int)((remain_ticks * 10000ULL) / timer_freq);
+    }
 }
 
 void set_core_timer_interrupt_tick(unsigned long long timer_count)

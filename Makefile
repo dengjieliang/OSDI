@@ -134,8 +134,21 @@ $(INITRAMFS_IMG): $(LABTEST_PACK_FILES)
 
 # ---- 編譯 C 與 Assembly ----
 
-# Driver/time.c uses double, so it must not be built with -mgeneral-regs-only
+# Driver/time.c, Kernel/timer_manager.c, Shell/shell.c, and Lib/utils.c must agree on FP ABI
+# because timeout APIs and parsing now use double in shared headers.
 $(BUILD_DIR)/Driver/time.o: Driver/time.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -c $< -o $@
+
+$(BUILD_DIR)/Kernel/timer_manager.o: Kernel/timer_manager.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -c $< -o $@
+
+$(BUILD_DIR)/Shell/shell.o: Shell/shell.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -c $< -o $@
+
+$(BUILD_DIR)/Lib/utils.o: Lib/utils.c | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -c $< -o $@
 

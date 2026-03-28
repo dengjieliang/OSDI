@@ -1,6 +1,8 @@
 #ifndef UART_H
 #define UART_H
 
+#include "../Lib/base.h"
+
 //initializes mini UART
 void uart_init();
 void uart_init_dynamic();
@@ -20,6 +22,7 @@ void uart_send_hex(unsigned int number);
 void async_uart_send(char c);
 void async_uart_puts(const char *s);
 char async_uart_recv();
+bool async_uart_try_recv(char *out_char);
 unsigned int async_uart_recv_uint();
 void async_uart_send_integer(int number);
 void async_uart_send_unsigned_long_integer(unsigned long number);
