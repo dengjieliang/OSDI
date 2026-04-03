@@ -222,3 +222,41 @@ unsigned long long CombineByte(void* byte, unsigned int n)
 
     return result;
 }
+
+void uint_to_str(unsigned int val, char* buf, int buf_size)
+{
+    if (buf_size <= 0)
+    {
+        return;
+    }
+
+    if (val == 0)
+    {
+        buf[0] = '0';
+        if (buf_size > 1)
+        {
+            buf[1] = '\0';
+        }
+        return;
+    }
+
+    int len = 0;
+    unsigned int tmp = val;
+
+    while (tmp > 0 && len < buf_size - 1)
+    {
+        buf[len] = (char)('0' + (tmp % 10));
+        tmp /= 10;
+        len++;
+    }
+
+    buf[len] = '\0';
+
+    // 低位先寫，需反轉為正確的十進位順序
+    for (int l = 0, r = len - 1; l < r; l++, r--)
+    {
+        char c = buf[l];
+        buf[l] = buf[r];
+        buf[r] = c;
+    }
+}

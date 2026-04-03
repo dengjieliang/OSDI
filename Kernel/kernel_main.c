@@ -4,6 +4,7 @@
 #include "../Board/dtb.h"
 #include "../Board/fdtb.h"
 #include "../Kernel/exception.h"
+#include "../Kernel/io_task_queue.h"
 #include "../Board/common.h"
 #include "time.h"
 
@@ -36,10 +37,14 @@ void kernel_main(void* dtb_addr)
     //初始化timer
     core_timer_init();
 
+    // +2026/03/29 變更點：新增 queue 初始化，確保 IRQ routing 的 enqueue 路徑可正常運作。
+    // AE2: 在開 IRQ 前初始化 deferred task queue。
+    io_task_queue_init();
+
 
     // 會直接吃.S檔案內的 exception_vector_table
     set_exception_vector_table();
-    unmask_all_exceptions();
+    daif_unmask_all();
 
     if (kernel_banner_printed == false)
     {

@@ -56,6 +56,19 @@
     ldp x0, x1, [sp], #16
     .endm
 
+    .macro SAVE_ELR_SPSR
+    mrs x9, elr_el1
+    mrs x10, spsr_el1
+    stp x9, x10, [sp, #-16]!
+    .endm
+
+    .macro RESTORE_ELR_SPSR
+    ldp x9, x10, [sp], #16
+    msr elr_el1, x9
+    msr spsr_el1, x10
+    isb
+    .endm
+
 .balign 0x800      // 2KB (0x800)
 exception_vector_table:
     // ---- Group 1: Current EL, using SP_EL0 (offset 0x000) ----
@@ -151,32 +164,41 @@ el0_sync_entry:
 
 el0_irq_entry:
     SAVE_ALL
+    SAVE_ELR_SPSR
+    /* +2026/03/28 先把 ELR/SPSR 從目前 IRQ frame 讀到 x0/x1，傳給 C handler 作診斷/分派使用。 */
+    /* +2026/03/28 不能直接把 sp 當 ctx 傳入，因為 [sp..sp+15] 現在是 ELR/SPSR frame，不是 GPR frame。 */
+    /* +2026/03/28 所以 x2 需要用 sp+16，讓 C handler 看到固定且可擴充的 GPR context 佈局。 */
     /*x0 = ELR_EL1 (return address / faulting PC)*/
-    mrs x0, elr_el1
+    ldr x0, [sp]
 
     /*x1 = SPSR_EL1 (saved PSTATE)*/
-    mrs x1, spsr_el1
+    ldr x1, [sp, #8]
 
     /*x2 = pass pointer to saved GPR context*/
-    mov x2, sp
+    add x2, sp, #16
 
     bl  el0_irq_handler_c
+    RESTORE_ELR_SPSR
     RESTORE_ALL
     eret
 
 el1_irq_entry:
     SAVE_ALL
+    SAVE_ELR_SPSR
 
+    /* +2026/03/28 與 el0_irq_entry 相同：先載入本層保存的 ELR/SPSR，再把 GPR frame 指標傳給 C。 */
+    /* +2026/03/28 這能確保 nested IRQ 時每層 return state 都用自己的 stack frame，不會互相覆寫。 */
     /*x0 = ELR_EL1 (return address / faulting PC)*/
-    mrs x0, elr_el1
+    ldr x0, [sp]
 
     /*x1 = SPSR_EL1 (saved PSTATE)*/
-    mrs x1, spsr_el1
+    ldr x1, [sp, #8]
 
     /*x2 = pass pointer to saved GPR context*/
-    mov x2, sp
+    add x2, sp, #16
     bl  el1_irq_handler_c
 
+    RESTORE_ELR_SPSR
     RESTORE_ALL
     eret
 

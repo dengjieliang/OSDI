@@ -48,7 +48,7 @@ OBJ_ASM_KERNEL := $(BUILD_DIR)/Kernel/exception_table.o $(BUILD_DIR)/Kernel/user
 
 # 組合共用 Object 清單
 OBJ_COMMON_ALL := $(OBJ_COMMON_C) $(OBJ_ASM_COMMON)
-OBJ_COMMON_BOOT := $(filter-out $(BUILD_DIR)/Driver/uart.o $(BUILD_DIR)/FileSystem/cpio.o $(BUILD_DIR)/Kernel/timer_manager.o,$(OBJ_COMMON_ALL))
+OBJ_COMMON_BOOT := $(filter-out $(BUILD_DIR)/Driver/uart.o $(BUILD_DIR)/FileSystem/cpio.o $(BUILD_DIR)/Kernel/timer_manager.o $(BUILD_DIR)/Kernel/io_task_queue.o,$(OBJ_COMMON_ALL))
 OBJ_COMMON_KERNEL := $(OBJ_COMMON_ALL)
 
 # 設定 Entry Point Object (boot.o 必須在最前面)

@@ -1,4 +1,5 @@
 #include "../Kernel/io_task_queue.h"
+#include "../Kernel/exception.h"
 #include "../Lib/base.h"
 #include "../Lib/string.h"
 
@@ -9,43 +10,6 @@ static IoTask* free_list_head = NULL;
 // 各優先級 ready queue 的頭尾指標（FIFO）。
 static IoTask* ready_head[IO_TASK_PRIORITY_COUNT];
 static IoTask* ready_tail[IO_TASK_PRIORITY_COUNT];
-
-// Critical section helper:
-// 這組 helper 專門負責在 queue 短臨界區內保存/還原 DAIF，
-// 避免 IRQ 與主流程同時修改 free list / ready queue 導致資料結構損壞。
-// 保存目前 DAIF 狀態，並暫時只遮罩 IRQ（I bit），用於保護 queue 臨界區。
-// DAIF 的 D/A/I/F 分別是 Debug、SError、IRQ、FIQ 的 mask bit。
-// `msr daifset, #0x2` 的意思是只把 I bit 設成 1。
-// 在 AArch64 中，mask bit = 1 代表「遮罩/關閉」，不是開啟。
-// 所以這裡是「只關 IRQ」，而不是關閉全部例外。
-// 後面的 `isb` 會確保新的中斷遮罩狀態立刻生效。
-static unsigned long irq_save_local_irq(void)
-{
-	unsigned long daif;
-	__asm__ volatile("mrs %0, daif" : "=r"(daif) :: "memory");
-	__asm__ volatile(
-		"msr daifset, #0x2\n"
-		"isb\n"
-		:
-		:
-		: "memory"
-	);
-	return daif;
-}
-
-// 還原進入臨界區前的 DAIF 狀態。
-// 這不是單純「重新開中斷」，而是回到呼叫此 helper 之前的原始遮罩設定。
-// 例如：如果外層本來就已經關了 IRQ，這裡 restore 後也會維持關閉。
-static void irq_restore_local_irq(unsigned long daif)
-{
-	__asm__ volatile(
-		"msr daif, %0\n"
-		"isb\n"
-		:
-		: "r"(daif)
-		: "memory"
-	);
-}
 
 // 從 free list 取出一個 task（呼叫端需已在臨界區）。
 static IoTask* allocate_task_unsafe(void)
@@ -180,13 +144,13 @@ bool io_task_enqueue(
 	}
 
 	// 進入臨界區，避免 enqueue 與 dequeue/IRQ 同時修改 queue 狀態。
-	unsigned long saved_daif = irq_save_local_irq();
+	unsigned long saved_daif = local_irq_save();
 	IoTask* task = allocate_task_unsafe();
 
 	// pool 耗盡時直接失敗，不做動態擴容。
 	if (task == NULL)
 	{
-		irq_restore_local_irq(saved_daif);
+		local_irq_restore(saved_daif);
 		return false;
 	}
 
@@ -225,7 +189,7 @@ bool io_task_enqueue(
 
 	// 依優先級放進對應 ready queue，並維持同優先級 FIFO。
 	push_ready_task_unsafe(task);
-	irq_restore_local_irq(saved_daif);
+	local_irq_restore(saved_daif);
 	return true;
 }
 
@@ -269,20 +233,20 @@ bool io_task_dequeue(IoTask* out_task)
 	}
 
 	// dequeue 同樣需要臨界區，因為它會修改 ready queue 與 free list。
-	unsigned long saved_daif = irq_save_local_irq();
+	unsigned long saved_daif = local_irq_save();
 	IoTask* task = pop_ready_task_unsafe();
 
 	// queue 為空時直接返回 false。
 	if (task == NULL)
 	{
-		irq_restore_local_irq(saved_daif);
+		local_irq_restore(saved_daif);
 		return false;
 	}
 
 	// 將 task 內容複製到呼叫端提供的物件，再把池中節點回收到 free list。
 	*out_task = *task;
 	free_task_unsafe(task);
-	irq_restore_local_irq(saved_daif);
+	local_irq_restore(saved_daif);
 	return true;
 }
 
@@ -290,7 +254,7 @@ bool io_task_has_pending(void)
 {
 	// 只要任一優先級 queue 非空，就代表還有待處理任務。
 	bool has_pending = false;
-	unsigned long saved_daif = irq_save_local_irq();
+	unsigned long saved_daif = local_irq_save();
 
 	for (int p = 0; p < (int)IO_TASK_PRIORITY_COUNT; p += 1)
 	{
@@ -301,7 +265,7 @@ bool io_task_has_pending(void)
 		}
 	}
 
-	irq_restore_local_irq(saved_daif);
+	local_irq_restore(saved_daif);
 	return has_pending;
 }
 
@@ -323,7 +287,7 @@ bool io_task_has_higher_priority_than(IoTaskPriority current_priority)
 	}
 
 	bool found = false;
-	unsigned long saved_daif = irq_save_local_irq();
+	unsigned long saved_daif = local_irq_save();
 
 	for (int p = 0; p < (int)current_priority; p += 1)
 	{
@@ -335,7 +299,7 @@ bool io_task_has_higher_priority_than(IoTaskPriority current_priority)
 		}
 	}
 
-	irq_restore_local_irq(saved_daif);
+	local_irq_restore(saved_daif);
 	return found;
 }
 

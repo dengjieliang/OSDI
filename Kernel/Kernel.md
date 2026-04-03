@@ -34,7 +34,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 - `uart_init_dynamic()`、`uart_aux_mu_cntl_reg()`、`uart_open_ier_reg()`：重新建立 kernel 階段 UART 與 IRQ 路徑
 - `core_timer_init()`：啟用 core timer 與 local timer IRQ line
 - `set_exception_vector_table()`：安裝 EL1 向量表
-- `unmask_all_exceptions()`：解除 IRQ mask
+- `daif_unmask_all()`：解除 DAIF mask
 - `async_uart_puts("Welcome to OSDI")`（只印一次）
 - `shell_main()`：進入互動模式
 
@@ -122,8 +122,8 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 
 ### 目前提供的功能
 
-- `void mask_all_exceptions(void)`
-- `void unmask_all_exceptions(void)`
+- `void daif_mask_all(void)`
+- `void daif_unmask_all(void)`
 - `void set_exception_vector_table(void)`
 - `void default_handler_dump_c(unsigned long esr, unsigned long elr, unsigned long spsr)`
 - `void el0_sync_handler_c(unsigned long esr, unsigned long elr, unsigned long spsr, unsigned long *ctx)`
@@ -138,7 +138,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 ### 內容概述
 
 - 共用 helper
-  - `mask_all_exceptions()`
+  - `daif_mask_all()`
   - `read_far_el1()`
 - handler 行為
   - `default_handler_dump_c(...)`
@@ -208,7 +208,7 @@ Kernel 的 C 語言入口點。負責解析由 Bootloader 傳入的 DTB、初始
 1. 從 pool 配置可用節點
 2. 複製 callback / message / argc
 3. 以 `enqueue_tick + tansfer_seconds_to_ticks(after_seconds)` 計算 `trigger_tick`
-4. 在關中斷區間內（`mask_all_exceptions()`）插入排序 linked list
+4. 在關中斷區間內（`daif_mask_all()`）插入排序 linked list
 5. 解除中斷後，呼叫 `set_core_timer_interrupt_tick(timer_list_head->trigger_tick)` 更新硬體 compare
 
 #### `timer_interrupt_router()`

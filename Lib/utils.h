@@ -14,4 +14,8 @@ unsigned int reverseint(unsigned int number);
 unsigned int BigEndianToLittleEndian(void* byte);
 unsigned long long CombineByte(void* byte, unsigned int n);
 
+// 將非負整數轉為十進位字串，結果寫入 buf（含 null terminator）。
+// buf_size 須計入 '\0'；對值域 0..MAX_TIMERS-1，大小 4 即已足夠。
+void uint_to_str(unsigned int val, char* buf, int buf_size);
+
 #endif
