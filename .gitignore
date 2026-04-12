@@ -2,3 +2,5 @@ build/
 *.o
 *.bin
 .github/
+.cache/clangd/index/
+.vscode/
