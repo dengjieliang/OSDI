@@ -4,3 +4,4 @@ build/
 .github/
 .cache/clangd/index/
 .vscode/
+compile_commands.json
