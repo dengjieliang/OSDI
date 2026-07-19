@@ -6,7 +6,7 @@
 #include "../Kernel/exception.h"
 #include "../Kernel/io_task_queue.h"
 #include "../Board/common.h"
-#include "time.h"
+#include "../Driver/time.h"
 
 CtxT dtb_ctx;
 static bool kernel_banner_printed = false;
@@ -51,7 +51,7 @@ void kernel_main(void* dtb_addr)
         async_uart_puts("\r\nWelcome to OSDI\r\n");
         kernel_banner_printed = true;
     }
-    
+
     //獲取使用者輸入
     shell_main();
 }

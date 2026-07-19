@@ -30,8 +30,11 @@ static CommandFunc compare_command(char* command);
 static void split_command(int* argc, char* argv[]);
 static void cmd_dtb_intc(int argc, char* argv[]);
 static void cmd_fdtb(int argc, char* argv[]);
-static void cmd_set_timeout(int argc, char* argv[]);
+static void cmd_timeout_print_message(int argc, char* argv[]);
 static bool is_valid_seconds_format(const char* string);
+
+static void cmd_update_two_seconds(int argc, char* argv[]);
+static void cmd_start_two_seconds_timer();
 
 static const Command_t commands[] = 
 {
@@ -49,7 +52,7 @@ static const Command_t commands[] =
     {"test_user_mode", "Test User Mode", cmd_test_el0_user_mode},
     {"dtb_intc", "Show parsed interrupt controller base addresses", cmd_dtb_intc},
     {"fdtb", "Dump parsed DTB context (initrd, UART, GPIO, INTC bases)", cmd_fdtb},
-    {"setTimeout", "setTimeout CALLBACK [ARGS...] SECONDS (non-blocking)", cmd_set_timeout},
+    {"setTimeout", "setTimeout CALLBACK [ARGS...] SECONDS (non-blocking)", cmd_timeout_print_message},
     {NULL, NULL} // Sentinel to mark the end of the array
 };
 
@@ -89,6 +92,8 @@ static void shell_redraw_prompt_if_needed(const char *current_input, int current
 
 void shell_main()
 {
+    cmd_start_two_seconds_timer();
+
     while (1)
     {
         shell_input_line();
@@ -371,6 +376,17 @@ static void cmd_test_el1_bad_read(int argc, char* argv[])
 
 static void cmd_test_el0_user_mode(int argc, char* argv[])
 {
+    if (argc < 2)
+    {
+        async_uart_puts("Please Enter FileName");
+        return;
+    }
+    else if (argc != 2)
+    {
+        async_uart_puts("False Argument");
+        return;
+    }
+
     async_uart_puts("[TEST] EL0 user mode -> expect switch to EL0 then print user mode message\r\n");
     void* user_start_addr = 0;; // 依你的平台可換更明顯的EL0程式位址
     unsigned long user_size = 0;
@@ -388,8 +404,7 @@ static void cmd_test_el0_user_mode(int argc, char* argv[])
     }
     else
     {
-        core_timer_init();
-        set_core_timer_interrupt_tick(get_current_tick() + tansfer_seconds_to_ticks(1));
+        add_timer(NULL, 0, NULL, 2.0); // 延遲 0.5 秒後再切換到 EL0，確保 shell prompt 已經輸出完成
         static unsigned char user_stack[4096] __attribute__((aligned(16)));
         unsigned long user_stack_top = (unsigned long)(user_stack + sizeof(user_stack));
         enter_el0((unsigned long)user_start_addr, user_stack_top);
@@ -522,7 +537,7 @@ static void cmd_fdtb(int argc, char* argv[])
     else { async_uart_puts("NOT FOUND\n"); }
 }
 
-static void cmd_set_timeout(int argc, char* argv[])
+static void cmd_timeout_print_message(int argc, char* argv[])
 {
     if (argc < 3)
     {
@@ -591,4 +606,31 @@ static bool is_valid_seconds_format(const char* string)
     }
 
     return digit_count > 0;
+}
+
+static void print_message(int argc, char* argv[])
+{
+
+}
+
+static void cmd_update_two_seconds(int argc, char* argv[])
+{
+    (void)argc;
+    (void)argv;
+    async_uart_puts("[core timer] uptime=");
+    get_current_second_string();
+    async_uart_puts("\n");
+
+    if (add_timer(cmd_update_two_seconds, 0, NULL, 2.0) == false)
+    {
+        async_uart_puts("Error: failed to register timeout event\n");
+    }
+}
+
+static void cmd_start_two_seconds_timer()
+{
+    if (add_timer(cmd_update_two_seconds, 0, NULL, 2.0) == false)
+    {
+        async_uart_puts("Error: failed to register timeout event\n");
+    }
 }

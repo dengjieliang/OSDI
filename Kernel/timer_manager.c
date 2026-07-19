@@ -46,7 +46,7 @@ static timer_event_t* allocate_timer()
 {
     for (int i = 0; i < MAX_TIMERS; i++) 
     {
-        if (!timer_pool[i].in_use) 
+        if (timer_pool[i].in_use == false) 
         {
             timer_pool[i].in_use = true;
             return &timer_pool[i];
@@ -178,7 +178,7 @@ bool add_timer(CommandFunc callback, int argc, char** argv, double after_seconds
         return false;
     }
 
-    if (argv == NULL)
+    if (argc > 0 && argv == NULL)
     {
         free_timer(new_timer);
         return false;
@@ -196,7 +196,8 @@ bool add_timer(CommandFunc callback, int argc, char** argv, double after_seconds
     new_timer->next = NULL;
     new_timer->in_use = true;
 
-    daif_mask_all();
+    // 以 local_irq_save/restore 保護 timer_list_head 的操作，避免在 nested IRQ 或 deferred task 中被打斷。 
+    unsigned long saved_daif = local_irq_save();
 
     if (timer_list_head == NULL || new_timer->trigger_tick < timer_list_head->trigger_tick) 
     {
@@ -215,7 +216,9 @@ bool add_timer(CommandFunc callback, int argc, char** argv, double after_seconds
     }
 
     set_core_timer_interrupt_tick(timer_list_head->trigger_tick);
-    daif_unmask_all();
+    
+    // 恢復中斷狀態
+    local_irq_restore(saved_daif);
 
     return true;
 }
@@ -282,7 +285,7 @@ void timer_interrupt_router(void)
             expired->trigger_tick
         );
 
-        if (!enqueued)
+        if (enqueued == false)
         {
             // io_task queue 滿了（非預期）：釋放 dispatch context 並 fallback 直接執行。
             free_dispatch_ctx(ctx_idx);
