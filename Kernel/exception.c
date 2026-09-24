@@ -6,6 +6,7 @@
 #include "../Kernel/io_task_queue.h" // AE2: deferred task queue (enqueue in IRQ, run with IRQ enabled)
 #include "../Board/common.h"
 #include "../Shell/shell.h"
+#include "../Driver/time.h"
 
 // +2026/03/29 變更點：新增去重旗標，避免同一來源 IRQ 在 deferred task 尚未執行前重複 enqueue。
 static volatile bool timer_task_queued = false;
@@ -148,8 +149,12 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
         // 這裡只 enqueue deferred task，不在 IRQ routing 階段執行重工作。
         if (irq_src & (1 << 1))
         {
-            if (!timer_task_queued)
+            set_core_timer_interrupt_tick(~0ULL);
+
+            if (timer_task_queued == false)
             {
+                set_core_timer_interrupt_tick(~0ULL);          // ① 先把門鈴線關掉
+                
                 // +2026/03/29 變更點：irq_routing 僅 enqueue，不做重 callback。
                 bool queued = io_task_enqueue(
                     IO_TASK_TYPE_TIMER_CALLBACK,
@@ -214,7 +219,6 @@ static void irq_routing(unsigned long elr, unsigned long spsr, unsigned long *ct
     // =========================================================
     // +2026/03/29 變更點：統一 exit path，修正多處 early return 的 DAIF 不對稱風險。
     // 這是唯一 exit path：避免多處 early return 造成 DAIF 狀態不對稱。
-    // 重新開啟 IRQ 後執行 queue，可在 task 執行中被更高優先 IRQ 打斷（nested）。
     // 每層 nested handler return 前都會走到這裡，因此優先級檢查可逐層生效。
     daif_unmask_all();
     io_task_run_all();
